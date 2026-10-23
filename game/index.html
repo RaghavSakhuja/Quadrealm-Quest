@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Quadrealm Quest — Local Playtest</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ============ SETUP ============ -->
+<div id="setup">
+  <h1>Quadrealm Quest</h1>
+  <p style="color:var(--muted)">Local hot-seat playtest. Pick players, then draft 3 characters each. Everyone plays from this one PC. Your game auto-saves — a refresh resumes where you left off.</p>
+
+  <div class="players-pick">
+    <span style="align-self:center">Players:</span>
+    <button data-pc="2">2</button>
+    <button data-pc="3">3</button>
+    <button data-pc="4">4</button>
+    <span id="pcLabel" style="align-self:center;color:var(--accent)"></span>
+  </div>
+
+  <div id="seats"></div>
+
+  <h2>Draft characters for <span id="draftFor" style="color:var(--accent2)"></span></h2>
+  <div class="char-grid" id="charGrid"></div>
+
+  <div style="margin-top:16px; display:flex; gap:10px;">
+    <button id="startBtn" class="primary" disabled>Start Game</button>
+    <button id="resetSetup" class="ghost">Reset</button>
+  </div>
+</div>
+
+<!-- ============ GAME ============ -->
+<div id="game" class="hidden">
+  <div id="topbar">
+    <span class="turn" id="turnLabel"></span>
+    <span class="phase" id="phaseLabel"></span>
+    <span style="flex:1"></span>
+    <span class="zoomgrp">
+      <button id="zoomOut" class="ghost" title="Zoom out">−</button>
+      <span id="zoomLabel" style="min-width:42px;text-align:center;color:var(--muted)">100%</span>
+      <button id="zoomIn" class="ghost" title="Zoom in">+</button>
+      <button id="zoomFit" class="ghost" title="Fit board to view">Fit</button>
+    </span>
+    <button id="calibrateBtn" class="ghost" title="Define board spaces by clicking them">Calibrate</button>
+    <button id="newGameBtn" class="ghost">New Game</button>
+    <button id="endTurnBtn" class="primary">End Turn ▶</button>
+  </div>
+
+  <div id="calibrateBar" class="hidden">
+    Calibration: click each space to add a tile. Right-click a dot to remove. Click <b>Done</b> when finished.
+    <button id="calibrateClear" class="ghost">Clear all</button>
+    <button id="calibrateDone" class="primary">Done</button>
+    <span id="tileCount" style="color:var(--muted)"></span>
+  </div>
+
+  <div id="boardWrap">
+    <div id="board"><img class="boardimg" src="/assets/QuadRealm Quest/QuadRealm Quest.png" alt="board" /></div>
+  </div>
+
+  <div id="side">
+    <div class="side-scroll" id="sidePanel"></div>
+  </div>
+</div>
+
+<div id="cardModal" class="modal-bg hidden">
+  <div class="modal">
+    <h3 id="cardModalTitle"></h3>
+    <div id="cardModalType" style="color:var(--accent2);font-size:12px;margin-bottom:6px"></div>
+    <div id="cardModalText" style="font-size:14px;line-height:1.4"></div>
+    <div id="cardModalNote" style="font-size:12px;color:var(--muted);margin-top:8px"></div>
+    <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+      <button id="cardPlay" class="primary">Play</button>
+      <button id="cardClose" class="ghost">Close</button>
+    </div>
+  </div>
+</div>
+
+<script src="game.js"></script>
+</body>
+</html>
