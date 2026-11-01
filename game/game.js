@@ -262,11 +262,13 @@ function pickOpponent(){
   const pick = promptChoice(choices, "Attack which player?");
   return pick ? pick.pi : null;
 }
-// Must return a character: cancelling falls back to the first living one.
-function chooseCharacter(pi, title){
+// A forced choice (defender, area hit) falls back to the first living character on cancel;
+// a cancellable one (your own pick) returns null. Null also when nobody is alive.
+function chooseCharacter(pi, title, cancellable=false){
   const chars = livingChars(S.players[pi]);
+  if(!chars.length) return null;
   const pick = promptChoice(chars.map(c=>({ char:c, label:`${c.name} (${c.curHp}/${c.hp})` })), title);
-  return pick ? pick.char : chars[0];
+  return pick ? pick.char : (cancellable ? null : chars[0]);
 }
 function promptChoice(choices, title="Choose target:"){
   if(choices.length===0){ alert("No valid targets."); return null; }
@@ -292,11 +294,13 @@ function useAttack(attacker, atk){
   if(atk.target==="enemy"){
     const pi = pickOpponent(); if(pi==null) return;
     veil = hasSupport(p, "Veilpiercer") && confirm("Use Veilpiercer? You pick the character, half damage.");
-    const char = veil ? chooseCharacter(pi, `Veilpiercer: which of ${S.players[pi].name}'s characters?`)
+    const char = veil ? chooseCharacter(pi, `Veilpiercer: which of ${S.players[pi].name}'s characters?`, true)
                       : chooseCharacter(pi, `${S.players[pi].name}: which character takes the hit?`);
+    if(!char) return;
     target = { pi, char };
   } else if(atk.target==="ally"){
-    target = { pi:S.current, char:chooseCharacter(S.current, "Which of your characters?") };
+    const char = chooseCharacter(S.current, "Which of your characters?", true); if(!char) return;
+    target = { pi:S.current, char };
   }
   const hit = (n)=> veil ? veilpiercerDamage(n) : n;
   // Area effects: every hit opponent chooses which of their characters takes it.
@@ -465,8 +469,8 @@ function cardApi(p){
   return {
     p,
     energy(n){ p.energy = Math.max(0, p.energy + n); },
-    healChosen(n){ healCharacter(chooseCharacter(S.current, "Heal which character?"), n); },
-    selfDmgChosen(n){ const l=locate(chooseCharacter(S.current, "Which character takes the self-damage?")); if(l) applyDamage(l.pi,l.ci,n); },
+    healChosen(n){ const c=chooseCharacter(S.current, "Heal which character?"); if(c) healCharacter(c, n); },
+    selfDmgChosen(n){ const c=chooseCharacter(S.current, "Which character takes the self-damage?"); const l=c&&locate(c); if(l) applyDamage(l.pi,l.ci,n); },
     draw(n){ drawCard(p, n); },
     hand(){ return p.hand.length; },
     distinctTypes(){ return new Set(p.chars.filter(c=>c.alive).map(c=>c.id)).size; },
