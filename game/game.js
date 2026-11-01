@@ -17,7 +17,7 @@ let S = null;
 function newState(players) {
   const deck = shuffle(buildDeck());
   return { version: SAVE_VERSION, players, deck, discard: [], current: 0, phase: "Main", log: [], drewThisTurn: false,
-    tiles: [], scale: null };
+    tiles: [], scale: null, debug: false };
 }
 
 function shuffle(a) {
@@ -116,6 +116,7 @@ $("#startBtn").onclick = ()=>{
 function enterGame(){
   $("#setup").classList.add("hidden");
   $("#game").classList.remove("hidden");
+  $("#debugToggle").checked = !!S.debug;
   render(); renderTokens();
   const img = $(".boardimg");
   if(img.complete && img.naturalWidth) initBoardScale();
@@ -345,8 +346,10 @@ function render(){
     <div class="hpbar"><div style="width:${hpPct}%"></div></div></div>`));
 
   const eRow = h(`<div class="stat-row"><span class="pill energy">⚡ Energy: ${p.energy}</span></div>`);
-  eRow.appendChild(btn("+1", ()=>{ p.energy++; render(); }));
-  eRow.appendChild(btn("−1", ()=>{ if(p.energy>0){p.energy--; render();} }));
+  if(S.debug){   // free resources: Debug only
+    eRow.appendChild(btn("+1", ()=>{ p.energy++; render(); }));
+    eRow.appendChild(btn("−1", ()=>{ if(p.energy>0){p.energy--; render();} }));
+  }
   panel.appendChild(eRow);
 
   const chRow = h(`<div class="chars"></div>`);
@@ -423,12 +426,14 @@ function render(){
   });
   panel.appendChild(hand);
   const handCtrls = h(`<div class="controls" style="margin-top:6px"></div>`);
-  handCtrls.appendChild(btn("Draw +1", ()=>{ drawCard(p,1); render(); }));
+  if(S.debug) handCtrls.appendChild(btn("Draw +1", ()=>{ drawCard(p,1); render(); }));
   handCtrls.appendChild(btn("Discard→+1⚡", ()=>{ if(p.hand.length){ S.discard.push(p.hand.pop()); p.energy++; log(`${p.name} discarded for +1 energy.`); render(); } }));
   panel.appendChild(handCtrls);
 
-  panel.appendChild(h(`<div class="section"><b>Manual Damage / Heal</b></div>`));
-  panel.appendChild(buildDamageHelper());
+  if(S.debug){
+    panel.appendChild(h(`<div class="section"><b>Manual Damage / Heal</b></div>`));
+    panel.appendChild(buildDamageHelper());
+  }
 
   panel.appendChild(h(`<div class="section"><b>Log</b></div>`));
   const logEl = h(`<div class="log"></div>`);
@@ -599,6 +604,7 @@ $("#newGameBtn").onclick = ()=>{
 $("#zoomIn").onclick = ()=> setZoom(+0.1);
 $("#zoomOut").onclick = ()=> setZoom(-0.1);
 $("#zoomFit").onclick = ()=> fitBoard();
+$("#debugToggle").onchange = (e)=>{ S.debug = e.target.checked; render(); };
 
 $("#calibrateBtn").onclick = ()=>{
   calibrating = true;
