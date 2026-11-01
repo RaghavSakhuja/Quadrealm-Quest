@@ -141,3 +141,18 @@ The phase engine should be built so the board model can later plug into Move wit
 12. **Response-window mechanics** (one pass round, one level of Stolen Tactics, current player doesn't respond, Distraction/Slowed by Fear limited to two windows) — my calls, from the review.
 13. **Area attacks before the board model** — recorded realm for "same realm", attacker ticks targets for "within N spaces".
 14. **Conditional cards** (Mystic Insight, Warrior's Endurance, Quick Draw, …) check their condition at the point it can be known — usually end of turn — instead of paying out immediately as they do now.
+
+## Rollout stages
+
+Each stage leaves the game playable so it can be playtested before the next.
+
+1. **One piece per player, no active character.** One token per player; realm recorded per player. Attacker picks the attacking character; defender picks the receiving character (simple picker). Terrain bonuses apply by class (Marksmen, Swordsmen, Mages, Brutes). Free energy/draw/damage buttons move behind a Debug toggle.
+2. **Turn phases.** Start → Move → Attack → End state machine with phase indicator and per-phase controls; mandatory roll; one attack (Echoing Strikes / Blade Dance exceptions); end-of-turn effects; every card tagged with its timing window; class-card rule; choose which card to discard; pass-the-screen at the start of each turn.
+3. **Response windows.** Window engine (eligible players, pass-the-screen, Play/Pass, one round, one Stolen Tactics chance) at the four window points; defender's choice moves inside the attack window; area-attack targeting by recorded realm / attacker ticks.
+4. **Card clean-up.** Conditional cards check at the right time; Mana Overflow, Spirit Drain, Misty Fog per the calls above; "Change your character" trade via a button until the board model exists.
+
+Later projects: the board model; automating reaction-card effects.
+
+## Testing
+
+Move rules logic (damage, terrain, phase transitions, window eligibility) into its own file with no DOM access, and test it with Node's built-in test runner (`node --test`) — still zero dependencies. Each stage is also played through in the browser before it's called done.
