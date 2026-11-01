@@ -53,3 +53,20 @@ test("isCompatibleSave rejects v1 and garbage", () => {
   assert.equal(Rules.isCompatibleSave(null), false);
   assert.equal(Rules.isCompatibleSave({ version:2 }), false);
 });
+
+const mk = (alive) => ({ chars: alive.map((a, i) => ({ id:["knight","cleric","titan"][i], alive:a })) });
+test("livingChars returns only living characters", () => {
+  assert.deepEqual(Rules.livingChars(mk([true,false,true])).map(c => c.id), ["knight","titan"]);
+});
+test("opponents skips the current player and eliminated players", () => {
+  const S = { players: [mk([true,true,true]), mk([false,false,false]), mk([false,true,false]), mk([true,true,true])] };
+  assert.deepEqual(Rules.opponents(S, 0), [2,3]);
+  assert.deepEqual(Rules.opponents(S, 3), [0,2]);
+});
+test("hasLivingClass checks living characters only", () => {
+  assert.equal(Rules.hasLivingClass(mk([true,true,true]), "Mages"), true);
+  assert.equal(Rules.hasLivingClass(mk([true,false,true]), "Mages"), false);
+});
+test("veilpiercerDamage halves, rounding down", () => {
+  assert.equal(Rules.veilpiercerDamage(5), 2); assert.equal(Rules.veilpiercerDamage(1), 0);
+});

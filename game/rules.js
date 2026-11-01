@@ -68,20 +68,20 @@ const CARDS = [
   { name:"Power Infusion", type:"event", text:"Your next attack this turn costs 1 less energy.",
     apply:a=>a.discount(1) },
   { name:"Overload", type:"event", text:"Gain 3 energy, but take 2 self-damage.",
-    apply:a=>{ a.energy(3); a.selfDmgActive(2); } },
+    apply:a=>{ a.energy(3); a.selfDmgChosen(2); } },
   { name:"Strategic Reserve", type:"event", text:"Gain 1 energy for every character type you have on the field.",
     apply:a=>a.energy(a.distinctTypes()) },
-  { name:"Medic's Touch", type:"event", text:"Heal 3 HP.", apply:a=>a.healActive(3) },
+  { name:"Medic's Touch", type:"event", text:"Heal 3 HP.", apply:a=>a.healChosen(3) },
   { name:"Recovery Surge", type:"event", text:"Heal 5 HP, but skip your next movement phase.",
-    apply:a=>{ a.healActive(5); a.log("  → remember to skip your next movement."); } },
+    apply:a=>{ a.healChosen(5); a.log("  → remember to skip your next movement."); } },
   { name:"Energizing Heal", type:"event", text:"Heal 1 HP per energy spent this turn.",
-    apply:a=>a.healActive(a.energySpent()) },
+    apply:a=>a.healChosen(a.energySpent()) },
   { name:"Divine Restoration", type:"event", text:"Heal HP equal to number of cards in hand.",
-    apply:a=>a.healActive(a.hand()) },
+    apply:a=>a.healChosen(a.hand()) },
   { name:"Ancient Knowledge", type:"event", text:"Draw 3 cards, then shuffle 2 from your hand back into the deck.",
     apply:a=>{ a.draw(3); a.log("  → shuffle 2 cards from your hand back into the deck (do manually)."); } },
-  { name:"Mana Overflow", type:"event", text:"If your active character is a Mage, gain 2 energy.",
-    apply:a=>{ if(a.isActiveMage()){ a.energy(2); } else a.log("  → active is not a Mage: no effect."); } },
+  { name:"Mana Overflow", type:"event", text:"If you have a living Mage, gain 2 energy.",
+    apply:a=>{ if(a.hasMage()){ a.energy(2); } else a.log("  → no living Mage: no effect."); } },
   { name:"Arrow Rain", type:"event", text:"Deal 2 damage to all opponents within 3 spaces.",
     apply:a=>a.aoeEnemies(2) },
   // --- Movement / situational / triggered: resolved manually ---
@@ -103,14 +103,14 @@ const CARDS = [
   { name:"Steady Aim", type:"event", cls:"Archer", text:"Skip your movement this turn to deal +2 damage on your next attack.", apply:a=>a.log("  → +2 damage on your next attack (apply manually).") },
   { name:"Explosive Arrows", type:"event", cls:"Archer", text:"If you use an AOE attack this turn, it deals +1 damage to all targets.", apply:null },
   { name:"Blade Dance", type:"event", cls:"Knight", text:"If you defeat an opponent this turn, attack again for free.", apply:null },
-  { name:"Warrior's Endurance", type:"event", cls:"Knight", text:"If you don't move this turn, heal 2 HP.", apply:a=>a.healActive(2) },
+  { name:"Warrior's Endurance", type:"event", cls:"Knight", text:"If you don't move this turn, heal 2 HP.", apply:a=>a.healChosen(2) },
   { name:"Unshakable Resolve", type:"event", cls:"Knight", text:"If you start your turn with less than 5 HP, gain 2 energy.", apply:a=>a.energy(2) },
   { name:"Counterstrike", type:"event", cls:"Knight", text:"If an opponent attacks you from <5 spaces next turn, they take 2 damage.", apply:null },
   { name:"Restless Charge", type:"event", cls:"Knight", text:"Move 2 extra spaces, but your next attack must target an enemy within 3 spaces.", apply:null },
   { name:"Lifeblood Ritual", type:"event", cls:"Mage", text:"If your skill attack heals, restore 1 extra HP.", apply:null },
   { name:"Mystic Insight", type:"event", cls:"Mage", text:"Draw 2 cards if you don't attack this turn.", apply:a=>a.draw(2) },
   { name:"Magic Barrier", type:"event", cls:"Mage", text:"The next attack against you deals half damage.", apply:null },
-  { name:"Teleport Spell", type:"event", cls:"Mage", text:"If your active character is a Mage, move to any unoccupied space within 3 spaces.", apply:null },
+  { name:"Teleport Spell", type:"event", cls:"Mage", text:"If you have a living Mage, move to any unoccupied space within 3 spaces.", apply:null },
   { name:"Unyielding Strength", type:"event", cls:"Heavy", text:"Take 2 less damage from the next attack this turn.", apply:null },
   { name:"Titanic Slam", type:"event", cls:"Heavy", text:"If you use an ultimate attack this turn, all opponents take 2 damage.", apply:null },
   { name:"Adrenaline Rush", type:"event", cls:"Heavy", text:"If you take 5+ damage in a turn, gain 3 energy.", apply:a=>a.energy(3) },
@@ -122,20 +122,20 @@ const CARDS = [
   { name:"Warrior's Reclamation", type:"support", text:"For every 4 damage dealt, gain 1 energy.", apply:null },
   { name:"Alchemist's Exchange", type:"support", text:"Base does no damage; instead gives that much energy /2 (floor).", apply:null },
   { name:"Soul Battery", type:"support", text:"Converts all healing to energy (2:1).", apply:null },
-  { name:"Priestess' Blessing", type:"support", text:"Heal active character 1 HP at end of each turn.", apply:null },
-  { name:"Veilpiercer", type:"support", text:"Attack a non-active character for half damage.", apply:null },
+  { name:"Priestess' Blessing", type:"support", text:"Heal a character of your choice 1 HP at end of each turn.", apply:null },
+  { name:"Veilpiercer", type:"support", text:"When attacking, you pick which enemy character is hit, for half damage.", apply:null },
   { name:"Enchanted Library", type:"support", text:"Expend 2 energy to draw 1 additional card.", apply:a=>{ if(a.p.energy>=2){ a.energy(-2); a.draw(1); } else a.log("  → need 2 energy."); } },
   { name:"Echoing Strikes", type:"support", text:"If you have 2 characters of the same type, both attack but only use base damage.", apply:null },
   { name:"Gambler's Favor", type:"support", text:"Roll the dice twice and choose your roll.", apply:null },
   { name:"Critical Hit", type:"support", text:"If you roll 5-6 on movement, deal +2 damage on your next attack.", apply:null },
   { name:"Steady March", type:"support", text:"You may move exactly 3 spaces instead of rolling.", apply:null },
   { name:"Refined Strategy", type:"support", text:"Once per turn, discard a card to draw a new one.", apply:null },
-  { name:"Endurance Training", type:"support", text:"If your active character doesn't attack this turn, heal 3 HP.", apply:null },
+  { name:"Endurance Training", type:"support", text:"If you don't attack this turn, heal a character of your choice 3 HP.", apply:null },
   { name:"Sharpened Reflexes", type:"support", text:"If you roll a 1 or 2, gain 1 energy.", apply:null },
   { name:"Steady Aim (Archer)", type:"support", cls:"Archer", text:"If you don't move this turn, reduce your next attack cost by 1.", apply:null },
   { name:"Duelist's Challenge", type:"support", cls:"Knight", text:"If you land on an opponent's space, your next attack deals +2 damage.", apply:null },
   { name:"Calculated Strategy", type:"support", text:"If you play no cards this turn, draw 1 extra card.", apply:null },
-  { name:"Teleportation Spell", type:"support", cls:"Mage", text:"If your active character is a Mage, teleport up to 3 spaces.", apply:null },
+  { name:"Teleportation Spell", type:"support", cls:"Mage", text:"If you have a living Mage, teleport up to 3 spaces.", apply:null },
   { name:"Stone Fortress", type:"support", text:"If you have 2+ Heavy Build characters, they take 1 less damage.", apply:null },
 ];
 const CARD_POOL = CARDS.filter(c=>!c.hidden);
@@ -178,7 +178,15 @@ function createPlayer({ name, color, charIds, seat }){
     movedThisTurn:false, noMoveNext:false, attackDiscount:0, energySpentThisTurn:0 };
 }
 
-const Rules = { ROSTER, TERRAINS, CARDS, CARD_POOL, cardByName, buildDeck, classOf,
+/* ---- Targeting ---- */
+function livingChars(player){ return player.chars.filter(c=>c.alive); }
+function opponents(state, currentIdx){
+  return state.players.map((p,i)=>i).filter(i=>i!==currentIdx && livingChars(state.players[i]).length>0);
+}
+function hasLivingClass(player, cls){ return livingChars(player).some(c=>classOf(c.id)===cls); }
+function veilpiercerDamage(n){ return Math.floor(n/2); }
+
+const Rules = { livingChars, opponents, hasLivingClass, veilpiercerDamage, ROSTER, TERRAINS, CARDS, CARD_POOL, cardByName, buildDeck, classOf,
   combatDamage, selfDamageAfterTerrain, healAfterTerrain, startRegen,
   SAVE_VERSION, isCompatibleSave, createPlayer };
 if (typeof module === "object" && module.exports) module.exports = Rules; else window.Rules = Rules;
