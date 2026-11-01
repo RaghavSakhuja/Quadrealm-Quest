@@ -149,6 +149,25 @@ const CLASS_OF = { archer:"Marksmen", ballista:"Marksmen", knight:"Swordsmen", s
   cleric:"Mages", necromancer:"Mages", berserker:"Brutes", titan:"Brutes", gambler:"Neutral", tactician:"Neutral" };
 function classOf(id){ return CLASS_OF[id]; }
 
-const Rules = { ROSTER, TERRAINS, CARDS, CARD_POOL, cardByName, buildDeck, classOf };
+/* ---- Terrain modifiers (by class, from the realm the owner's piece is in) ---- */
+function combatDamage({ base, attackerId, attackerTerrain, defenderId, defenderTerrain, isAoe }){
+  let dmg = base;
+  if(classOf(attackerId)==="Swordsmen" && attackerTerrain==="Volcano") dmg += 2;        // Heated Edge
+  if(isAoe && classOf(attackerId)==="Marksmen" && attackerTerrain==="Mountain") dmg += 1; // Eagle's View
+  if(classOf(defenderId)==="Marksmen" && defenderTerrain==="Forest") dmg -= 2;          // Natural Cover
+  return Math.max(0, dmg);
+}
+function selfDamageAfterTerrain(charId, terrain, amount){
+  return (classOf(charId)==="Brutes" && terrain==="Hot Spring") ? 0 : amount;           // Unyielding Fury
+}
+function healAfterTerrain(charId, terrain, amount){
+  return (classOf(charId)==="Mages" && terrain==="Hot Spring") ? amount+1 : amount;     // Rejuvenating Waters
+}
+function startRegen(charId, terrain){
+  return (classOf(charId)==="Swordsmen" && terrain==="Forest") ? 2 : 0;                 // Forager's Resilience
+}
+
+const Rules = { ROSTER, TERRAINS, CARDS, CARD_POOL, cardByName, buildDeck, classOf,
+  combatDamage, selfDamageAfterTerrain, healAfterTerrain, startRegen };
 if (typeof module === "object" && module.exports) module.exports = Rules; else window.Rules = Rules;
 })();

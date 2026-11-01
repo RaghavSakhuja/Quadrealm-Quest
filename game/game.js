@@ -5,7 +5,8 @@ const ASSET = {
 };
 const SAVE_KEY = "quadrealm_save_v1";
 
-const { ROSTER, TERRAINS, CARDS, CARD_POOL, cardByName, buildDeck, classOf } = Rules;
+const { ROSTER, TERRAINS, CARDS, CARD_POOL, cardByName, buildDeck, classOf,
+  combatDamage, selfDamageAfterTerrain, healAfterTerrain, startRegen } = Rules;
 
 const PLAYER_COLORS = ["#e6b450","#58c6ff","#68d391","#ff6b6b"];
 
@@ -172,7 +173,8 @@ function startTurn(){
   p.attackDiscount = 0; p.energySpentThisTurn = 0;   // reset per-turn card modifiers
   p.chars.forEach(c=>{
     c.movedThisTurn = false;
-    if(c.alive && classOf(c.id)==="Swordsmen" && c.terrain==="Forest"){ c.curHp=Math.min(c.hp,c.curHp+2); log(`${c.name} regenerates 2 HP (Forager's Resilience).`); } // Forest regen
+    const regen = c.alive ? startRegen(c.id, terrainOf(c)) : 0;
+    if(regen){ c.curHp=Math.min(c.hp,c.curHp+regen); log(`${c.name} regenerates ${regen} HP (Forager's Resilience).`); }
     if(c.noMoveNext){ log(`⛔ ${c.name} cannot move this turn.`); c.noMoveNext=false; }
   });
   drawCard(p, 1);
@@ -236,26 +238,25 @@ function locate(ch){
   for(let pi=0;pi<S.players.length;pi++){ const ci=S.players[pi].chars.indexOf(ch); if(ci>=0) return {pi,ci}; }
   return null;
 }
+function terrainOf(ch){ return ch.terrain || null; }
 // Outgoing combat damage, applying attacker/defender terrain modifiers.
 let pendingBaseBonus = 0;   // +damage applied to the next non-AOE hit (The Titan's Gauntlet)
 function dealCombatDamage(defChar, base, attacker, isAoe){
-  let dmg = base;
-  if(!isAoe && pendingBaseBonus){ dmg += pendingBaseBonus; pendingBaseBonus = 0; } // Titan's Gauntlet
-  if(classOf(attacker.id)==="Swordsmen" && attacker.terrain==="Volcano") dmg += 2;            // Heated Edge
-  if(isAoe && attacker.id==="archer" && attacker.terrain==="Mountain") dmg += 1; // Eagle's View
-  if(defChar.id==="archer" && defChar.terrain==="Forest") dmg = Math.max(0,dmg-2); // Natural Cover
+  if(!isAoe && pendingBaseBonus){ base += pendingBaseBonus; pendingBaseBonus = 0; } // Titan's Gauntlet
+  const dmg = combatDamage({ base, attackerId:attacker.id, attackerTerrain:terrainOf(attacker),
+    defenderId:defChar.id, defenderTerrain:terrainOf(defChar), isAoe });
   const loc = locate(defChar); if(!loc) return;
   applyDamage(loc.pi, loc.ci, dmg);
   log(`  → ${defChar.name} takes ${dmg}${isAoe?" (AOE)":""}.`);
 }
 function dealSelfDamage(ch, amount){
-  if(ch.id==="berserker" && ch.terrain==="Hot Spring"){ log(`  → ${ch.name} ignores ${amount} self-damage (Unyielding Fury).`); return; }
+  if(selfDamageAfterTerrain(ch.id, terrainOf(ch), amount)===0 && amount>0){ log(`  → ${ch.name} ignores ${amount} self-damage (Unyielding Fury).`); return; }
   const loc = locate(ch); if(!loc) return;
   applyDamage(loc.pi, loc.ci, amount);
   log(`  → ${ch.name} takes ${amount} self-damage.`);
 }
 function healCharacter(ch, amount){
-  if(classOf(ch.id)==="Mages" && ch.terrain==="Hot Spring") amount += 1;   // Rejuvenating Waters
+  amount = healAfterTerrain(ch.id, terrainOf(ch), amount);
   if(!ch.alive && ch.curHp<=0) return;
   ch.curHp = Math.min(ch.hp, ch.curHp + amount);
   log(`  → ${ch.name} heals ${amount} (now ${ch.curHp}/${ch.hp}).`);

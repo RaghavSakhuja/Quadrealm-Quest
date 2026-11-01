@@ -15,3 +15,27 @@ test("roster HP matches the rulebook", () => {
 test("deck has one copy of every card", () => {
   assert.equal(Rules.buildDeck().length, Rules.CARD_POOL.length);
 });
+
+const cd = (o) => Rules.combatDamage({ base:4, attackerId:"knight", attackerTerrain:null, defenderId:"knight", defenderTerrain:null, isAoe:false, ...o });
+test("Heated Edge: Swordsmen +2 in Volcano", () => { assert.equal(cd({ attackerId:"samurai", attackerTerrain:"Volcano" }), 6); });
+test("Eagle's View: Marksmen +1 on AOE in Mountain, includes Ballista", () => {
+  assert.equal(cd({ attackerId:"ballista", attackerTerrain:"Mountain", isAoe:true }), 5);
+  assert.equal(cd({ attackerId:"ballista", attackerTerrain:"Mountain", isAoe:false }), 4);
+});
+test("Natural Cover: Marksmen take -2 in Forest, never below 0", () => {
+  assert.equal(cd({ defenderId:"ballista", defenderTerrain:"Forest" }), 2);
+  assert.equal(cd({ base:2, defenderId:"archer", defenderTerrain:"Forest" }), 0);
+  assert.equal(cd({ base:1, defenderId:"archer", defenderTerrain:"Forest" }), 0);
+});
+test("Unyielding Fury: Brutes ignore self-damage in Hot Spring, includes Titan", () => {
+  assert.equal(Rules.selfDamageAfterTerrain("titan", "Hot Spring", 3), 0);
+  assert.equal(Rules.selfDamageAfterTerrain("titan", "Forest", 3), 3);
+});
+test("Rejuvenating Waters: Mages +1 healing in Hot Spring", () => {
+  assert.equal(Rules.healAfterTerrain("necromancer", "Hot Spring", 5), 6);
+  assert.equal(Rules.healAfterTerrain("knight", "Hot Spring", 5), 5);
+});
+test("Forager's Resilience: Swordsmen regen 2 in Forest", () => {
+  assert.equal(Rules.startRegen("samurai", "Forest"), 2);
+  assert.equal(Rules.startRegen("archer", "Forest"), 0);
+});
