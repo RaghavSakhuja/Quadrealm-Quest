@@ -1,13 +1,13 @@
 /* ========================= DATA ========================= */
 const ASSET = {
   cards: "/assets/Cards/",
-  board: "/assets/QuadRealm Quest/QuadRealm Quest.png",
 };
-const SAVE_KEY = "quadrealm_save_v2";
+const SAVE_KEY = "quadrealm_save_v3";
 
-const { ROSTER, TERRAINS, CARDS, CARD_POOL, cardByName, buildDeck, classOf,
+const { ROSTER, CARDS, CARD_POOL, cardByName, buildDeck, classOf,
   combatDamage, selfDamageAfterTerrain, healAfterTerrain, startRegen, SAVE_VERSION, isCompatibleSave, createPlayer,
-  livingChars, opponents, hasLivingClass, veilpiercerDamage } = Rules;
+  livingChars, opponents, hasLivingClass, veilpiercerDamage,
+  SPACES, nextOptions, prevSpace, realmOf, SPACE_EFFECTS } = Rules;
 
 const PLAYER_COLORS = ["#e6b450","#58c6ff","#68d391","#ff6b6b"];
 
@@ -17,7 +17,7 @@ let S = null;
 function newState(players) {
   const deck = shuffle(buildDeck());
   return { version: SAVE_VERSION, players, deck, discard: [], current: 0, phase: "Main", log: [], drewThisTurn: false,
-    tiles: [], scale: null, debug: false };
+    scale: null, debug: false };
 }
 
 function shuffle(a) {
@@ -124,8 +124,6 @@ function enterGame(){
 }
 
 /* ========================= BOARD SCALING ========================= */
-let calibrating = false;
-
 function boardNatural(){
   const img = $(".boardimg");
   return { w: img.naturalWidth || 1000, h: img.naturalHeight || 1000 };
@@ -163,8 +161,8 @@ function startTurn(){
   S.phase = "Main";
   S.drewThisTurn = false;
   p.attackDiscount = 0; p.energySpentThisTurn = 0;   // reset per-turn card modifiers
-  p.movedThisTurn = false;
-  if(p.noMoveNext){ log(`⛔ ${p.name} cannot move this turn.`); p.noMoveNext=false; }
+  p.movedThisTurn = false; p.rolledThisTurn = false; p.cantMove = false;
+  if(p.noMoveNext){ log(`⛔ ${p.name} cannot move this turn.`); p.noMoveNext=false; p.cantMove=true; }
   p.chars.forEach(c=>{
     const regen = c.alive ? startRegen(c.id, terrainOf(c)) : 0;
     if(regen){ c.curHp=Math.min(c.hp,c.curHp+regen); log(`${c.name} regenerates ${regen} HP (Forager's Resilience).`); }
@@ -203,12 +201,83 @@ function drawCard(p, n){
   }
 }
 
+// Roll and move: once per turn (Debug allows more), then the final space's effect applies.
 function rollDice(){
+  const p = S.players[S.current];
+  if(p.cantMove){ alert(`${p.name} cannot move this turn.`); return; }
+  if(p.rolledThisTurn && !S.debug){ alert("You already rolled this turn."); return; }
   const r = 1+Math.floor(Math.random()*6);
-  log(`🎲 ${S.players[S.current].name} rolled ${r}.`);
-  render();
+  p.rolledThisTurn = true;
+  log(`🎲 ${p.name} rolled ${r}.`);
+  moveForward(p, r);
+  landOn(p);
+  render(); renderTokens();
   const d = $("#dice"); if(d) d.textContent = r;
   return r;
+}
+
+/* ---- Movement along the board loop ---- */
+const LANE_LABEL = { 1:"+1 lane (outer) — gain 1 energy", 0:"Middle lane — free", "-1":"−1 lane (inner) — pay 1 energy" };
+function chooseLane(p, opts){
+  const choices = opts.filter(o=> o.energy>=0 || p.energy>=-o.energy)
+    .map(o=>({ ...o, label:LANE_LABEL[o.energy] }));
+  const realm = realmOf(opts[0].to);
+  return promptChoice(choices, `${p.name}: which lane into ${realm}?`) || choices.find(o=>o.energy===0);   // cancel → middle
+}
+function moveForward(p, n){
+  for(let k=0;k<n;k++){
+    const opts = nextOptions(p.pos);
+    const o = opts.length>1 ? chooseLane(p, opts) : opts[0];
+    if(o.energy){ p.energy = Math.max(0, p.energy + o.energy); log(`  → ${o.energy>0?"+1":"−1"} lane: ${p.name} ${o.energy>0?"gains":"pays"} 1 energy.`); }
+    p.trail.push(p.pos); if(p.trail.length>20) p.trail.shift();
+    p.pos = o.to;
+  }
+  if(n>0) p.movedThisTurn = true;
+}
+function moveBack(p, n){
+  for(let k=0;k<n;k++) p.pos = p.trail.pop() || prevSpace(p.pos);   // back the way it came
+  if(n>0) p.movedThisTurn = true;
+}
+function spaceLabel(id){ const s=SPACES[id]; return `${s.realm||"Corridor"}${s.text?` — ${s.text}`:""}`; }
+
+// Apply the effect of the space the piece ended on.
+function landOn(p){
+  const s = SPACES[p.pos];
+  log(`  → ${p.name} lands on ${spaceLabel(p.pos)}.`);
+  const fx = s.text && SPACE_EFFECTS[s.text];
+  if(fx) fx(spaceApi(p));
+}
+function spaceApi(p){
+  const pi = S.players.indexOf(p);
+  return {
+    draw(n){ drawCard(p, n); },
+    energy(n){ p.energy = Math.max(0, p.energy + n); },
+    discardChosen(){
+      if(!p.hand.length){ log("  → no card to discard."); return; }
+      const pick = promptChoice(p.hand.map((c,i)=>({ i, label:c })), "Discard which card?") || { i:0 };
+      const [c] = p.hand.splice(pick.i, 1); S.discard.push(c); log(`  → discarded ${c}.`);
+    },
+    healChosen(n){ const c=chooseCharacter(pi, `Heal ${n}: which character?`); if(c) healCharacter(c, n); },
+    loseHpChosen(n){ const c=chooseCharacter(pi, `Lose ${n} HP: which character?`); const l=c&&locate(c);
+      if(l){ applyDamage(l.pi, l.ci, n); log(`  → ${c.name} loses ${n} HP.`); } },
+    moveBack(n){ moveBack(p, n); log(`  → moved back to ${spaceLabel(p.pos)}.`); },   // that space does not trigger
+    changeCharacter(){ changeCharacter(p); },
+    dmgBuff(kind, n){ p.dmgBuffs[kind] += n; log(`  → next ${kind==="any"?"attack":kind+" attack"} deals +${n} damage.`); },
+    costBuff(n){ p.costCut += n; log(`  → next attack costs ${n} less energy.`); },
+    doubleNextEvent(){ p.doubleEvent = true; log("  → next event card's effect is doubled."); },
+  };
+}
+// Swap one living character for a character card nobody holds; it starts at full HP.
+function changeCharacter(p){
+  const held = new Set(S.players.flatMap(pl=>pl.chars.map(c=>c.id)));
+  const free = ROSTER.filter(r=>!held.has(r.id));
+  if(!free.length || !livingChars(p).length){ log("  → no character to change."); return; }
+  if(!confirm(`${p.name}: change one of your characters?`)) return;
+  const pi = S.players.indexOf(p);
+  const out = chooseCharacter(pi, "Replace which character?", true); if(!out) return;
+  const pick = promptChoice(free.map(r=>({ r, label:`${r.name} (${r.hp} HP)` })), `Replace ${out.name} with?`); if(!pick) return;
+  p.chars[p.chars.indexOf(out)] = { ...pick.r, curHp:pick.r.hp, alive:true };
+  log(`  → ${p.name} swapped ${out.name} for ${pick.r.name}.`);
 }
 
 /* ========================= ACTIONS ========================= */
@@ -230,7 +299,7 @@ function locate(ch){
   return null;
 }
 function ownerOf(ch){ const l=locate(ch); return l ? S.players[l.pi] : null; }
-function terrainOf(ch){ const o=ownerOf(ch); return (o && o.terrain) || null; }   // realm of the owner's piece
+function terrainOf(ch){ const o=ownerOf(ch); return o ? realmOf(o.pos) : null; }   // realm of the space the owner's piece is on
 // Outgoing combat damage, applying attacker/defender terrain modifiers.
 let pendingBaseBonus = 0;   // +damage applied to the next non-AOE hit (The Titan's Gauntlet)
 function dealCombatDamage(defChar, base, attacker, isAoe){
@@ -287,7 +356,7 @@ function useAttack(attacker, atk){
   const cost = atk.costOf ? atk.costOf(p, roll) : atk.cost;
   let supportCut = 0;
   if(atkIndex===1 && hasSupport(p, "Arcane Efficiency")) supportCut += 1;   // skill cost -1
-  const effCost = Math.max(0, cost - (p.attackDiscount||0) - supportCut);
+  const effCost = Math.max(0, cost - (p.attackDiscount||0) - supportCut - (p.costCut||0));
   if(p.energy < effCost){ alert(`Not enough energy (need ${effCost}).`); return; }
 
   let target=null, veil=false;
@@ -310,7 +379,13 @@ function useAttack(attacker, atk){
   p.energy -= effCost;
   p.energySpentThisTurn = (p.energySpentThisTurn||0) + effCost;
   if(p.attackDiscount){ p.attackDiscount = 0; }   // discount consumed by this attack
+  p.costCut = 0;                                   // board-space discount too
   pendingBaseBonus = (atkIndex===0 && hasSupport(p, "The Titan's Gauntlet")) ? 1 : 0;   // base +1 dmg
+  if(atk.target==="enemy"){   // board-space damage bonuses ride on the main hit
+    const kind = ["basic","skill","ultimate"][atkIndex];
+    pendingBaseBonus += p.dmgBuffs.any + p.dmgBuffs[kind];
+    p.dmgBuffs.any = 0; p.dmgBuffs[kind] = 0;
+  }
 
   const api = {
     attacker, player:p, target, roll, energyUsed:effCost,
@@ -324,7 +399,7 @@ function useAttack(attacker, atk){
     stealAll:(n)=>{ eachOpponent(c=> dealCombatDamage(c, n, attacker, true)); if(n>0) healCharacter(attacker, n); },
     draw:(n)=> drawCard(p, n),
     noMove:(ch)=>{ const o=ownerOf(ch); o.noMoveNext=true; log(`  → ${o.name} cannot move next turn.`); },
-    swapPos:(ch)=>{ const o=ownerOf(ch); [p.x,p.y,o.x,o.y]=[o.x,o.y,p.x,p.y]; log(`  → swapped pieces with ${o.name}.`); },
+    swapPos:(ch)=>{ const o=ownerOf(ch); [p.pos,p.trail,o.pos,o.trail]=[o.pos,o.trail,p.pos,p.trail]; log(`  → swapped pieces with ${o.name}.`); },
     targetMoved: !!(target && S.players[target.pi].movedThisTurn),
     log:(m)=> log(m),
   };
@@ -366,15 +441,14 @@ function render(){
   panel.appendChild(h(`<div class="section"><b>Characters</b></div>`));
   panel.appendChild(chRow);
 
-  // Realm of this player's piece — drives terrain bonuses for all their characters.
-  const terrRow = h(`<div class="section"><b>Your piece — Realm</b></div>`);
-  panel.appendChild(terrRow);
-  const tsel = document.createElement("select");
-  TERRAINS.forEach(t=>{ const o=document.createElement("option"); o.value=t; o.textContent=t||"(none)"; if((p.terrain||"")===t) o.selected=true; tsel.appendChild(o); });
-  tsel.style.background="var(--panel2)"; tsel.style.color="var(--text)"; tsel.style.border="1px solid var(--line)"; tsel.style.borderRadius="4px"; tsel.style.padding="3px";
-  tsel.onchange = ()=>{ p.terrain = tsel.value || null; render(); };
-  const trWrap = h(`<div class="controls"></div>`); trWrap.appendChild(tsel);
-  panel.appendChild(trWrap);
+  // The space the piece is on sets the realm (terrain bonuses) for all this player's characters.
+  panel.appendChild(h(`<div class="section"><b>Your piece</b></div>`));
+  panel.appendChild(h(`<div style="font-size:12px">${spaceLabel(p.pos)}</div>`));
+  const b = p.dmgBuffs, buffs = [
+    b.any && `next attack +${b.any} dmg`, b.basic && `basic +${b.basic}`, b.skill && `skill +${b.skill}`,
+    b.ultimate && `ultimate +${b.ultimate}`, p.costCut && `next attack −${p.costCut}⚡`, p.doubleEvent && "next event doubled",
+  ].filter(Boolean);
+  if(buffs.length) panel.appendChild(h(`<div style="font-size:11px;color:var(--good)">${buffs.join(" · ")}</div>`));
 
   // Any living character may attack; pick the character and the attack together.
   panel.appendChild(h(`<div class="section"><b>Attacks</b></div>`));
@@ -396,9 +470,10 @@ function render(){
   panel.appendChild(dice);
   const drow = h(`<div class="controls"></div>`);
   drow.appendChild(h(`<span id="dice">–</span>`));
-  drow.appendChild(btn("Roll 🎲", rollDice));
+  const rollB = btn("Roll 🎲", rollDice);
+  rollB.disabled = p.cantMove || (p.rolledThisTurn && !S.debug);
+  drow.appendChild(rollB);
   panel.appendChild(drow);
-  panel.appendChild(h(`<div style="font-size:11px;color:var(--muted);margin-top:4px">Drag tokens on the board to move.</div>`));
 
   panel.appendChild(h(`<div class="section"><b>Support Slots (${(p.supports||[]).length}/2)</b></div>`));
   const slots = h(`<div class="supports"></div>`);
@@ -507,89 +582,36 @@ $("#cardPlay").onclick = ()=>{
     p.hand.splice(openCardIdx, 1);
     S.discard.push(name);
     log(`${p.name} played ${name}.`);
-    if(def && def.apply){ def.apply(cardApi(p)); }
+    const twice = p.doubleEvent; p.doubleEvent = false;   // "Next Event Card Effect Doubled" space
+    if(def && def.apply){ def.apply(cardApi(p)); if(twice){ log("  → doubled:"); def.apply(cardApi(p)); } }
+    else if(twice) log("  → doubled: apply this card's effect twice.");
   }
   $("#cardModal").classList.add("hidden");
   render();
 };
 
-/* ========================= BOARD TOKENS & TILES ========================= */
+/* ========================= BOARD TOKENS ========================= */
 function sc(){ return S.scale || 1; }
 
+// Pieces sit on their space's centre; pieces sharing a space fan out so all stay visible.
+const SHARE_OFFSETS = [[0,0],[-14,-14],[14,14],[14,-14],[-14,14]];
 function renderTokens(){
   const board = $("#board");
   board.querySelectorAll(".token").forEach(t=>t.remove());
-  renderTiles();
+  const seen = {};
   S.players.forEach((p, pi)=>{
     if(!p.chars.some(c=>c.alive)) return;   // eliminated players leave the board
+    const s = SPACES[p.pos], k = seen[p.pos] = (seen[p.pos]||0) + 1;
+    const [dx,dy] = SHARE_OFFSETS[(k-1) % SHARE_OFFSETS.length];
     const t = document.createElement("div");
     t.className = "token"+(pi===S.current?" active-pawn":"");
-    t.style.left = (p.x*sc())+"px"; t.style.top = (p.y*sc())+"px";
+    t.style.left = (s.x*sc()+dx)+"px"; t.style.top = (s.y*sc()+dy)+"px";
     t.style.background = p.color; t.style.borderColor = p.color;
     t.textContent = pi+1;
-    t.title = p.name;
-    makeDraggable(t, p);
+    t.title = `${p.name} — ${spaceLabel(p.pos)}`;
     board.appendChild(t);
   });
 }
-
-function renderTiles(){
-  const board = $("#board");
-  board.querySelectorAll(".tile").forEach(t=>t.remove());
-  S.tiles.forEach((tile, i)=>{
-    const d = document.createElement("div");
-    d.className = "tile" + (calibrating ? " calib" : " move");
-    d.style.left = (tile.x*sc())+"px"; d.style.top = (tile.y*sc())+"px";
-    if(calibrating){
-      d.title = `Tile ${i+1} — right-click to remove`;
-      d.oncontextmenu = (e)=>{ e.preventDefault(); S.tiles.splice(i,1); renderTiles(); updateTileCount(); saveState(); };
-    } else {
-      d.title = `Move your piece here`;
-      d.onclick = ()=> movePiece(tile);
-    }
-    board.appendChild(d);
-  });
-}
-
-// Click-to-move: place the current player's piece on this space.
-function movePiece(tile){
-  const p = S.players[S.current];
-  p.x = tile.x; p.y = tile.y; p.movedThisTurn = true;
-  renderTokens(); saveState();
-}
-
-function nearestTile(x,y){
-  let best=null, bd=Infinity;
-  S.tiles.forEach(t=>{ const dx=t.x-x, dy=t.y-y, d=dx*dx+dy*dy; if(d<bd){ bd=d; best=t; } });
-  return best;
-}
-
-function makeDraggable(el, c){   // c = the player whose piece this is
-  let sx,sy,ox,oy,drag=false;
-  el.onmousedown = e=>{ if(calibrating) return; drag=true; el.style.cursor="grabbing"; sx=e.clientX; sy=e.clientY; ox=c.x; oy=c.y; e.preventDefault(); };
-  window.addEventListener("mousemove", e=>{
-    if(!drag) return;
-    c.x = ox+(e.clientX-sx)/sc(); c.y = oy+(e.clientY-sy)/sc();   // screen delta -> board coords
-    el.style.left=(c.x*sc())+"px"; el.style.top=(c.y*sc())+"px";
-  });
-  window.addEventListener("mouseup", ()=>{
-    if(!drag) return;
-    drag=false; el.style.cursor="grab"; c.movedThisTurn = true;
-    if(S.tiles.length){ const t=nearestTile(c.x,c.y); if(t){ c.x=t.x; c.y=t.y; renderTokens(); } }  // snap to nearest space
-    saveState();
-  });
-}
-
-// Calibration: click the board to drop a tile at the click position (board coords).
-$("#board").addEventListener("click", e=>{
-  if(!calibrating) return;
-  if(e.target.classList.contains("tile")) return;
-  const rect = $("#board").getBoundingClientRect();
-  S.tiles.push({ x:(e.clientX-rect.left)/sc(), y:(e.clientY-rect.top)/sc() });
-  renderTiles(); updateTileCount(); saveState();
-});
-
-function updateTileCount(){ const el=$("#tileCount"); if(el) el.textContent = `${S.tiles.length} spaces`; }
 
 /* ========================= HELPERS ========================= */
 function h(html){ const d=document.createElement("div"); d.innerHTML=html.trim(); return d.firstChild; }
@@ -604,28 +626,11 @@ $("#newGameBtn").onclick = ()=>{
   $("#resetSetup").click();
 };
 
-/* ---- Zoom + calibration controls ---- */
+/* ---- Zoom controls ---- */
 $("#zoomIn").onclick = ()=> setZoom(+0.1);
 $("#zoomOut").onclick = ()=> setZoom(-0.1);
 $("#zoomFit").onclick = ()=> fitBoard();
 $("#debugToggle").onchange = (e)=>{ S.debug = e.target.checked; render(); };
-
-$("#calibrateBtn").onclick = ()=>{
-  calibrating = true;
-  $("#calibrateBar").classList.remove("hidden");
-  $("#board").classList.add("calibrating");
-  updateTileCount(); renderTokens();
-};
-$("#calibrateDone").onclick = ()=>{
-  calibrating = false;
-  $("#calibrateBar").classList.add("hidden");
-  $("#board").classList.remove("calibrating");
-  renderTokens();
-};
-$("#calibrateClear").onclick = ()=>{
-  if(!confirm("Remove all defined spaces?")) return;
-  S.tiles = []; renderTiles(); updateTileCount(); saveState();
-};
 
 window.addEventListener("resize", ()=>{ if(S) applyScale(); });
 

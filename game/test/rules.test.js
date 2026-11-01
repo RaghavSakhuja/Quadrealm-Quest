@@ -40,18 +40,18 @@ test("Forager's Resilience: Swordsmen regen 2 in Forest", () => {
   assert.equal(Rules.startRegen("archer", "Forest"), 0);
 });
 
-test("createPlayer puts the piece on the player, not the characters", () => {
+test("createPlayer puts the piece on Embark, not on the characters", () => {
   const p = Rules.createPlayer({ name:"P1", color:"#fff", charIds:["knight","cleric","titan"], seat:1 });
-  assert.equal(p.x, 300); assert.equal(p.y, 240); assert.equal(p.terrain, null);
+  assert.equal(p.pos, Rules.START_SPACE); assert.deepEqual(p.trail, []); assert.equal("x" in p, false);
   assert.equal(p.energy, 0); assert.deepEqual(p.hand, []); assert.deepEqual(p.supports, []);
   assert.deepEqual(p.chars.map(c => [c.id, c.curHp, c.alive]), [["knight",30,true],["cleric",15,true],["titan",35,true]]);
   for (const c of p.chars) { assert.equal("x" in c, false); assert.equal("terrain" in c, false); }
 });
 test("isCompatibleSave rejects v1 and garbage", () => {
-  assert.equal(Rules.isCompatibleSave({ version:2, players:[] }), true);
+  assert.equal(Rules.isCompatibleSave({ version:3, players:[] }), true);
   assert.equal(Rules.isCompatibleSave({ players:[] }), false);
   assert.equal(Rules.isCompatibleSave(null), false);
-  assert.equal(Rules.isCompatibleSave({ version:2 }), false);
+  assert.equal(Rules.isCompatibleSave({ version:3 }), false);
 });
 
 const mk = (alive) => ({ chars: alive.map((a, i) => ({ id:["knight","cleric","titan"][i], alive:a })) });
@@ -69,4 +69,57 @@ test("hasLivingClass checks living characters only", () => {
 });
 test("veilpiercerDamage halves, rounding down", () => {
   assert.equal(Rules.veilpiercerDamage(5), 2); assert.equal(Rules.veilpiercerDamage(1), 0);
+});
+
+/* ---- Board model ---- */
+const walk = (laneIdx) => { let id = Rules.START_SPACE, n = 0;
+  do { const o = Rules.nextOptions(id); id = (o.length > 1 ? o[laneIdx] : o[0]).to; n++; } while (id !== Rules.START_SPACE && n < 100);
+  return n; };
+test("board has 4 three-space corridors and 4 realms of 6+5+6 lanes", () => {
+  assert.equal(Object.keys(Rules.SPACES).length, 4*3 + 4*17);
+});
+test("start is Embark, with no realm", () => {
+  assert.equal(Rules.START_SPACE, "6,0");
+  assert.equal(Rules.SPACES["6,0"].text, "Embark");
+  assert.equal(Rules.realmOf("6,0"), null);
+});
+test("the loop is 32 spaces by middle lanes and 36 by outer lanes", () => {
+  assert.equal(walk(1), 32); assert.equal(walk(0), 36); assert.equal(walk(2), 36);
+});
+test("lane split after the top corridor offers +1, middle, -1 into Mountain", () => {
+  assert.deepEqual(Rules.nextOptions("8,0").map(o => [o.to, o.energy]), [["10,0",1],["10,1",0],["9,1",-1]]);
+  assert.deepEqual(Rules.nextOptions("7,0").map(o => o.to), ["8,0"]);
+  assert.deepEqual(Rules.nextOptions("15,5").map(o => o.to), ["15,6"]);
+});
+test("lane splits for every realm", () => {
+  assert.deepEqual(Rules.nextOptions("15,8").map(o => o.to), ["15,10","14,10","14,9"]);
+  assert.deepEqual(Rules.nextOptions("7,15").map(o => o.to), ["5,15","5,14","6,14"]);
+  assert.deepEqual(Rules.nextOptions("0,7").map(o => o.to), ["0,5","1,5","1,6"]);
+  assert.deepEqual(Rules.nextOptions("5,1").map(o => o.to), ["6,0"]);
+});
+test("realmOf follows the space colour", () => {
+  assert.equal(Rules.realmOf("10,0"), "Mountain"); assert.equal(Rules.realmOf("12,13"), "Forest");
+  assert.equal(Rules.realmOf("3,13"), "Volcano"); assert.equal(Rules.realmOf("0,5"), "Hot Spring");
+  assert.equal(Rules.realmOf("15,7"), null);
+});
+test("prevSpace steps back along the path; from a realm exit it uses the middle lane", () => {
+  assert.equal(Rules.prevSpace("10,0"), "8,0"); assert.equal(Rules.prevSpace("11,1"), "10,0");
+  assert.equal(Rules.prevSpace("15,6"), "14,5"); assert.equal(Rules.prevSpace("6,0"), "5,1");
+});
+test("space texts match the board", () => {
+  const t = id => Rules.SPACES[id].text;
+  assert.equal(t("12,13"), "Attack costs 1 less energy"); assert.equal(t("15,5"), "Next Event Card Effect Doubled");
+  assert.equal(t("4,3"), "Move back 1 space"); assert.equal(t("10,1"), null); assert.equal(t("7,0"), null);
+});
+test("every space text has an effect", () => {
+  for (const s of Object.values(Rules.SPACES)) if (s.text && s.text !== "Embark") assert.ok(Rules.SPACE_EFFECTS[s.text], s.text);
+});
+test("space effects call the api", () => {
+  const calls = []; const api = new Proxy({}, { get: (_, k) => (...a) => calls.push([k, ...a]) });
+  Rules.SPACE_EFFECTS["Lose 2 energy"](api); Rules.SPACE_EFFECTS["Discard 1 card, then draw 2"](api);
+  Rules.SPACE_EFFECTS["Basic Attack +1 Damage"](api);
+  assert.deepEqual(calls, [["energy",-2],["discardChosen"],["draw",2],["dmgBuff","basic",1]]);
+});
+test("space centres sit on the 3216px board grid", () => {
+  assert.deepEqual([Rules.spaceXY(0,0).x, Math.round(Rules.spaceXY(15,15).y)], [250, 2968]);
 });
