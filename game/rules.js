@@ -11,7 +11,7 @@ const ROSTER = [
   { id:"ballista", name:"Ballista Engineer", hp:20, img:"Ballista Engineer.png", attacks:[
     {name:"Bolt Launcher", cost:0, note:"2 dmg", target:"enemy", resolve:a=>a.dmg(2)},
     {name:"Piercing Spear", cost:3, note:"3 dmg to target + all other enemies", target:"enemy", resolve:a=>{ a.dmg(3); a.aoe(3); }},
-    {name:"Tracking Radar", cost:4, note:"5 dmg (+3 if target moved)", target:"enemy", resolve:a=>a.dmg(5 + (a.target.char.movedThisTurn?3:0))},
+    {name:"Tracking Radar", cost:4, note:"5 dmg (+3 if target moved)", target:"enemy", resolve:a=>a.dmg(5 + (a.targetMoved?3:0))},
   ]},
   { id:"knight", name:"Knight", hp:30, img:"Knight.png", attacks:[
     {name:"Thrusting Sword", cost:0, note:"2 dmg", target:"enemy", resolve:a=>a.dmg(2)},
@@ -167,7 +167,19 @@ function startRegen(charId, terrain){
   return (classOf(charId)==="Swordsmen" && terrain==="Forest") ? 2 : 0;                 // Forager's Resilience
 }
 
+/* ---- Players and saves ---- */
+const SAVE_VERSION = 2;
+function isCompatibleSave(obj){ return !!(obj && obj.version===SAVE_VERSION && Array.isArray(obj.players)); }
+
+// One piece per player: position, realm and movement flags live on the player; characters are cards.
+function createPlayer({ name, color, charIds, seat }){
+  const chars = charIds.map(id=>{ const c = ROSTER.find(r=>r.id===id); return { ...c, curHp:c.hp, alive:true }; });
+  return { name, color, chars, energy:0, hand:[], supports:[], x:120+seat*180, y:120+seat*120, terrain:null,
+    movedThisTurn:false, noMoveNext:false, attackDiscount:0, energySpentThisTurn:0 };
+}
+
 const Rules = { ROSTER, TERRAINS, CARDS, CARD_POOL, cardByName, buildDeck, classOf,
-  combatDamage, selfDamageAfterTerrain, healAfterTerrain, startRegen };
+  combatDamage, selfDamageAfterTerrain, healAfterTerrain, startRegen,
+  SAVE_VERSION, isCompatibleSave, createPlayer };
 if (typeof module === "object" && module.exports) module.exports = Rules; else window.Rules = Rules;
 })();

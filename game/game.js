@@ -3,10 +3,10 @@ const ASSET = {
   cards: "/assets/Cards/",
   board: "/assets/QuadRealm Quest/QuadRealm Quest.png",
 };
-const SAVE_KEY = "quadrealm_save_v1";
+const SAVE_KEY = "quadrealm_save_v2";
 
 const { ROSTER, TERRAINS, CARDS, CARD_POOL, cardByName, buildDeck, classOf,
-  combatDamage, selfDamageAfterTerrain, healAfterTerrain, startRegen } = Rules;
+  combatDamage, selfDamageAfterTerrain, healAfterTerrain, startRegen, SAVE_VERSION, isCompatibleSave, createPlayer } = Rules;
 
 const PLAYER_COLORS = ["#e6b450","#58c6ff","#68d391","#ff6b6b"];
 
@@ -15,7 +15,7 @@ let S = null;
 
 function newState(players) {
   const deck = shuffle(buildDeck());
-  return { players, deck, discard: [], current: 0, phase: "Main", log: [], drewThisTurn: false,
+  return { version: SAVE_VERSION, players, deck, discard: [], current: 0, phase: "Main", log: [], drewThisTurn: false,
     tiles: [], scale: null };
 }
 
@@ -34,18 +34,14 @@ function loadState(){
   try {
     const raw = localStorage.getItem(SAVE_KEY);
     if(!raw) return false;
-    S = JSON.parse(raw);
+    const saved = JSON.parse(raw);
+    if(!isCompatibleSave(saved)){ clearSave(); return false; }   // older formats are discarded
+    S = saved;
     // Re-attach attack data (functions/arrays survive JSON, but keep roster as source of truth).
     S.players.forEach(p=>p.chars.forEach(c=>{
       const def = ROSTER.find(r=>r.id===c.id);
       if(def) c.attacks = def.attacks;
     }));
-    if(!Array.isArray(S.tiles)) S.tiles = [];      // migrate older saves
-    if(S.scale === undefined) S.scale = null;
-    // Old saves stored card image filenames; replace with the new card deck.
-    const looksOld = (S.deck||[]).some(x=>typeof x==="string" && x.endsWith(".png"));
-    if(looksOld){ S.deck = shuffle(buildDeck()); S.discard = []; S.players.forEach(p=>{ p.hand = []; }); }
-    S.players.forEach(p=>{ if(p.attackDiscount==null) p.attackDiscount=0; if(p.energySpentThisTurn==null) p.energySpentThisTurn=0; if(!Array.isArray(p.supports)) p.supports=[]; });
     return true;
   } catch(e){ return false; }
 }
@@ -110,13 +106,7 @@ function updateStart(){
 $("#resetSetup").onclick = ()=>{ setup={playerCount:0,seats:[],activeSeat:0}; $("#pcLabel").textContent=""; $("#seats").innerHTML=""; $("#charGrid").innerHTML=""; updateStart(); };
 
 $("#startBtn").onclick = ()=>{
-  const players = setup.seats.map((s,pi)=>{
-    const chars = s.picks.map((id,ci)=>{
-      const c = ROSTER.find(r=>r.id===id);
-      return { ...c, curHp:c.hp, alive:true, x: 120 + pi*180 + ci*18, y: 120 + pi*120 + ci*52 };
-    });
-    return { name:s.name, color:PLAYER_COLORS[pi], chars, energy:0, hand:[], activeIdx:0, supports:[] };
-  });
+  const players = setup.seats.map((s,pi)=>({ ...createPlayer({ name:s.name, color:PLAYER_COLORS[pi], charIds:s.picks, seat:pi }), activeIdx:0 }));
   S = newState(players);
   enterGame();
   startTurn(true);
@@ -171,11 +161,11 @@ function startTurn(){
   S.phase = "Main";
   S.drewThisTurn = false;
   p.attackDiscount = 0; p.energySpentThisTurn = 0;   // reset per-turn card modifiers
+  p.movedThisTurn = false;
+  if(p.noMoveNext){ log(`⛔ ${p.name} cannot move this turn.`); p.noMoveNext=false; }
   p.chars.forEach(c=>{
-    c.movedThisTurn = false;
     const regen = c.alive ? startRegen(c.id, terrainOf(c)) : 0;
     if(regen){ c.curHp=Math.min(c.hp,c.curHp+regen); log(`${c.name} regenerates ${regen} HP (Forager's Resilience).`); }
-    if(c.noMoveNext){ log(`⛔ ${c.name} cannot move this turn.`); c.noMoveNext=false; }
   });
   drawCard(p, 1);
   log(`${p.name}'s turn — +1 energy (now ${p.energy}), drew a card.`);
@@ -238,7 +228,8 @@ function locate(ch){
   for(let pi=0;pi<S.players.length;pi++){ const ci=S.players[pi].chars.indexOf(ch); if(ci>=0) return {pi,ci}; }
   return null;
 }
-function terrainOf(ch){ return ch.terrain || null; }
+function ownerOf(ch){ const l=locate(ch); return l ? S.players[l.pi] : null; }
+function terrainOf(ch){ const o=ownerOf(ch); return (o && o.terrain) || null; }   // realm of the owner's piece
 // Outgoing combat damage, applying attacker/defender terrain modifiers.
 let pendingBaseBonus = 0;   // +damage applied to the next non-AOE hit (The Titan's Gauntlet)
 function dealCombatDamage(defChar, base, attacker, isAoe){
@@ -312,8 +303,9 @@ function useAttack(attacker, atk){
     steal:(n)=>{ if(target){ dealCombatDamage(target.char, n, attacker, false); healCharacter(attacker, n); } },
     stealAll:(n)=>{ S.players.forEach((pl,pi)=>{ if(pi===S.current) return; pl.chars.forEach(c=>{ if(c.alive){ dealCombatDamage(c, n, attacker, true); } }); }); if(n>0) healCharacter(attacker, n); },
     draw:(n)=> drawCard(p, n),
-    noMove:(ch)=>{ ch.noMoveNext=true; log(`  → ${ch.name} cannot move next turn.`); },
-    swapPos:(ch)=>{ const ax=attacker.x, ay=attacker.y; attacker.x=ch.x; attacker.y=ch.y; ch.x=ax; ch.y=ay; log(`  → swapped positions with ${ch.name}.`); },
+    noMove:(ch)=>{ const o=ownerOf(ch); o.noMoveNext=true; log(`  → ${o.name} cannot move next turn.`); },
+    swapPos:(ch)=>{ const o=ownerOf(ch); [p.x,p.y,o.x,o.y]=[o.x,o.y,p.x,p.y]; log(`  → swapped pieces with ${o.name}.`); },
+    targetMoved: !!(target && S.players[target.pi].movedThisTurn),
     log:(m)=> log(m),
   };
 
@@ -355,13 +347,13 @@ function render(){
 
   const active = p.chars[p.activeIdx];
 
-  // Terrain (realm) selector for the active character — drives terrain combat modifiers.
-  const terrRow = h(`<div class="section"><b>${active.name} — Realm</b></div>`);
+  // Realm of this player's piece — drives terrain bonuses for all their characters.
+  const terrRow = h(`<div class="section"><b>Your piece — Realm</b></div>`);
   panel.appendChild(terrRow);
   const tsel = document.createElement("select");
-  TERRAINS.forEach(t=>{ const o=document.createElement("option"); o.value=t; o.textContent=t||"(none)"; if((active.terrain||"")===t) o.selected=true; tsel.appendChild(o); });
+  TERRAINS.forEach(t=>{ const o=document.createElement("option"); o.value=t; o.textContent=t||"(none)"; if((p.terrain||"")===t) o.selected=true; tsel.appendChild(o); });
   tsel.style.background="var(--panel2)"; tsel.style.color="var(--text)"; tsel.style.border="1px solid var(--line)"; tsel.style.borderRadius="4px"; tsel.style.padding="3px";
-  tsel.onchange = ()=>{ active.terrain = tsel.value || null; render(); };
+  tsel.onchange = ()=>{ p.terrain = tsel.value || null; render(); };
   const trWrap = h(`<div class="controls"></div>`); trWrap.appendChild(tsel);
   panel.appendChild(trWrap);
 
@@ -503,20 +495,16 @@ function renderTokens(){
   const board = $("#board");
   board.querySelectorAll(".token").forEach(t=>t.remove());
   renderTiles();
-  const p0 = S.players[S.current];
-  const activeChar = p0.chars[p0.activeIdx];
-  S.players.forEach((p)=>{
-    p.chars.forEach((c)=>{
-      const t = document.createElement("div");
-      const isActive = (c === activeChar);
-      t.className = "token"+(c.alive?"":" dead")+(isActive?" active-pawn":"");
-      t.style.left = (c.x*sc())+"px"; t.style.top = (c.y*sc())+"px";
-      t.style.backgroundImage = `url('${ASSET.cards+c.img}')`;
-      t.style.borderColor = p.color;
-      t.title = `${p.name} — ${c.name} (${c.curHp}/${c.hp})`;
-      makeDraggable(t, c);
-      board.appendChild(t);
-    });
+  S.players.forEach((p, pi)=>{
+    if(!p.chars.some(c=>c.alive)) return;   // eliminated players leave the board
+    const t = document.createElement("div");
+    t.className = "token"+(pi===S.current?" active-pawn":"");
+    t.style.left = (p.x*sc())+"px"; t.style.top = (p.y*sc())+"px";
+    t.style.background = p.color; t.style.borderColor = p.color;
+    t.textContent = pi+1;
+    t.title = p.name;
+    makeDraggable(t, p);
+    board.appendChild(t);
   });
 }
 
@@ -531,19 +519,17 @@ function renderTiles(){
       d.title = `Tile ${i+1} — right-click to remove`;
       d.oncontextmenu = (e)=>{ e.preventDefault(); S.tiles.splice(i,1); renderTiles(); updateTileCount(); saveState(); };
     } else {
-      d.title = `Move active pawn here`;
-      d.onclick = ()=> moveActiveTo(tile);
+      d.title = `Move your piece here`;
+      d.onclick = ()=> movePiece(tile);
     }
     board.appendChild(d);
   });
 }
 
-// Click-to-move: place the current player's active (living) character on this space.
-function moveActiveTo(tile){
+// Click-to-move: place the current player's piece on this space.
+function movePiece(tile){
   const p = S.players[S.current];
-  const c = p.chars[p.activeIdx];
-  if(!c.alive) return;
-  c.x = tile.x; c.y = tile.y; c.movedThisTurn = true;
+  p.x = tile.x; p.y = tile.y; p.movedThisTurn = true;
   renderTokens(); saveState();
 }
 
@@ -553,7 +539,7 @@ function nearestTile(x,y){
   return best;
 }
 
-function makeDraggable(el, c){
+function makeDraggable(el, c){   // c = the player whose piece this is
   let sx,sy,ox,oy,drag=false;
   el.onmousedown = e=>{ if(calibrating) return; drag=true; el.style.cursor="grabbing"; sx=e.clientX; sy=e.clientY; ox=c.x; oy=c.y; e.preventDefault(); };
   window.addEventListener("mousemove", e=>{

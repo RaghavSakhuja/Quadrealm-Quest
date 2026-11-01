@@ -39,3 +39,17 @@ test("Forager's Resilience: Swordsmen regen 2 in Forest", () => {
   assert.equal(Rules.startRegen("samurai", "Forest"), 2);
   assert.equal(Rules.startRegen("archer", "Forest"), 0);
 });
+
+test("createPlayer puts the piece on the player, not the characters", () => {
+  const p = Rules.createPlayer({ name:"P1", color:"#fff", charIds:["knight","cleric","titan"], seat:1 });
+  assert.equal(p.x, 300); assert.equal(p.y, 240); assert.equal(p.terrain, null);
+  assert.equal(p.energy, 0); assert.deepEqual(p.hand, []); assert.deepEqual(p.supports, []);
+  assert.deepEqual(p.chars.map(c => [c.id, c.curHp, c.alive]), [["knight",30,true],["cleric",15,true],["titan",35,true]]);
+  for (const c of p.chars) { assert.equal("x" in c, false); assert.equal("terrain" in c, false); }
+});
+test("isCompatibleSave rejects v1 and garbage", () => {
+  assert.equal(Rules.isCompatibleSave({ version:2, players:[] }), true);
+  assert.equal(Rules.isCompatibleSave({ players:[] }), false);
+  assert.equal(Rules.isCompatibleSave(null), false);
+  assert.equal(Rules.isCompatibleSave({ version:2 }), false);
+});
