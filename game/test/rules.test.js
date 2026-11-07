@@ -423,6 +423,127 @@ test("a mutual kill goes to whoever has more energy after paying", () => {
   p.hp = 1; d.hp = 3; p.energy = 0; d.energy = 1; Rules.attackFlow(S, 0, stubUi({})); assert.equal(S.winner, 1);
 });
 
+/* ---- Cards ---- */
+const card = (S, name, ui=stubUi({ confirms:[true] })) => { const p = S.players[S.current]; p.hand = [name]; return Rules.playEvent(S, 0, ui); };
+const brute = () => mkGame([["titan","knight","cleric"],["archer","gambler","berserker"]]);
+test("Adrenaline Rush pays only after 5+ damage, once", () => {
+  const S = brute(), p = S.players[0]; p.energy = 0; card(S, "Adrenaline Rush"); assert.equal(p.energy, 0);
+  Rules.takeDamage(S, p, 4); assert.equal(p.energy, 0); Rules.takeDamage(S, p, 1); assert.equal(p.energy, 3);
+  Rules.takeDamage(S, p, 5); assert.equal(p.energy, 3);
+});
+test("Unyielding Strength covers one attack, and only while a Brute is active", () => {
+  const S = brute(), p = S.players[0], a = S.players[1]; card(S, "Unyielding Strength");
+  assert.equal(Rules.combatDamage({ base:4, attacker:a, defender:p, kind:"skill", isArea:false }), 2);
+  p.activeIdx = 1; assert.equal(Rules.combatDamage({ base:4, attacker:a, defender:p, kind:"skill", isArea:false }), 4);
+});
+test("Unyielding Strength is spent by the attack it blocks", () => {
+  const S = brute(), [p,a] = S.players; card(S, "Unyielding Strength"); S.current = 1; S.phase = "Main"; p.pos = a.pos = "7,0"; a.energy = 2;
+  Rules.attackFlow(S, 1, stubUi({})); assert.equal(p.maxHp - p.hp, 2); assert.deepEqual(p.effects, []);
+});
+test("lasting effects end at the start of the owner's next turn", () => {
+  const S = brute(), p = S.players[0]; card(S, "Unyielding Strength"); Rules.startTurn(S, stubUi({}));
+  assert.deepEqual(p.effects, []);
+});
+test("conditional cards check their condition", () => {
+  const S = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"]]), p = S.players[0];
+  p.energy = 0; p.startTurnHp = 6; card(S, "Unshakable Resolve"); assert.equal(p.energy, 0);
+  p.startTurnHp = 4; card(S, "Unshakable Resolve"); assert.equal(p.energy, 2);
+});
+test("Battle Roar needs less than 10 HP", () => {
+  const S = brute(), p = S.players[0]; card(S, "Battle Roar"); assert.equal(p.attackDiscount, 0);
+  p.hp = 9; card(S, "Battle Roar"); assert.equal(p.attackDiscount, 1);
+});
+test("Strategic Reserve gains 1 per distinct type", () => {
+  const S = mkGame([["knight","samurai","titan"],["archer","gambler","berserker"]]), p = S.players[0]; p.energy = 0; card(S, "Strategic Reserve"); assert.equal(p.energy, 2);
+});
+const endWith = (name, active, set) => { const S = mkGame([["knight","archer","cleric"],["samurai","gambler","berserker"]]), p = S.players[0];
+  p.activeIdx = active; p.hp = 50; p.energy = 0; card(S, name); Object.assign(p, set); p.hand = []; S.phase = "After"; Rules.endTurn(S, stubUi({})); return p; };
+test("Warrior's Endurance checks at end of turn that you didn't move", () => {
+  assert.equal(endWith("Warrior's Endurance", 0, { movedThisTurn:false }).hp, 52);
+  assert.equal(endWith("Warrior's Endurance", 0, { movedThisTurn:true }).hp, 50);
+});
+test("Mystic Insight checks at end of turn that you didn't attack", () => {
+  assert.equal(endWith("Mystic Insight", 2, { attackedThisTurn:false }).hand.length, 2);
+  assert.equal(endWith("Mystic Insight", 2, { attackedThisTurn:true }).hand.length, 0);
+});
+test("Quick Draw checks at end of turn for a basic attack", () => {
+  assert.equal(endWith("Quick Draw", 1, { usedBasicThisTurn:true }).energy, 1);
+  assert.equal(endWith("Quick Draw", 1, { usedBasicThisTurn:false }).energy, 0);
+});
+test("Falling Rocks needs a target within 2, then stops their move", () => {
+  const S = two(); const [p,d] = S.players;
+  p.pos = "6,0"; d.pos = "8,0"; card(S, "Falling Rocks", stubUi({ picks:[1] })); assert.equal(d.noMoveNext, true);
+  d.noMoveNext = false; d.pos = "15,7"; card(S, "Falling Rocks"); assert.equal(d.noMoveNext, false);
+});
+test("Steady Aim skips the move and adds +2", () => {
+  const S = mkGame([["archer","knight","cleric"],["samurai","gambler","berserker"]]); S.phase = "Move"; const p = S.players[0];
+  card(S, "Steady Aim"); assert.equal(S.phase, "Main"); assert.equal(p.nextAttackBonus, 2);
+});
+test("Steady Aim does nothing once you've moved", () => {
+  const S = mkGame([["archer","knight","cleric"],["samurai","gambler","berserker"]]); S.phase = "Main"; const p = S.players[0];
+  card(S, "Steady Aim"); assert.equal(p.nextAttackBonus, 0);
+});
+test("Recovery Surge heals 5 and stops the next move", () => {
+  const S = brute(), p = S.players[0]; p.hp = 50; card(S, "Recovery Surge"); assert.equal(p.hp, 55); assert.equal(p.noMoveNext, true);
+});
+test("Arrow Rain is range-limited and is not an attack", () => {
+  const S = mkGame([["archer","knight","cleric"],["archer","gambler","berserker"],["samurai","ballista","tactician"]]); const [p,a,b] = S.players;
+  p.pos = "6,0"; a.pos = "8,0"; b.pos = "4,14"; const [x,y] = [a.hp,b.hp]; card(S, "Arrow Rain");
+  assert.deepEqual([x-a.hp, y-b.hp], [2,0]); assert.equal(p.attackedThisTurn, false);
+});
+test("Arrow Rain ignores Natural Cover", () => {
+  const S = mkGame([["archer","knight","cleric"],["archer","gambler","berserker"]]); const [p,a] = S.players;
+  p.pos = "15,10"; a.pos = "15,10"; const x = a.hp; card(S, "Arrow Rain"); assert.equal(x - a.hp, 2);
+});
+test("a doubled event resolves twice, only once per landing", () => {
+  const S = brute(), p = S.players[0]; p.pos = "15,5"; p.energy = 0;
+  card(S, "Power Infusion"); assert.equal(p.attackDiscount, 2);
+  card(S, "Power Infusion"); assert.equal(p.attackDiscount, 3);
+});
+test("Overload respects Unyielding Fury", () => {
+  const S = brute(), p = S.players[0]; p.pos = "0,5"; card(S, "Overload"); assert.equal(p.hp, p.maxHp); assert.equal(p.energy, 3);
+});
+test("a type card off-type warns, and does nothing", () => {
+  const S = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"]]), p = S.players[0]; p.energy = 0;
+  const ui = stubUi({ confirms:[true] }); card(S, "Mana Overflow", ui); assert.equal(p.energy, 0); assert.equal(ui.asked.length, 1); assert.deepEqual(p.hand, []);
+});
+test("declining the off-type warning keeps the card", () => {
+  const S = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"]]), p = S.players[0];
+  assert.equal(card(S, "Mana Overflow", stubUi({ confirms:[false] })), false); assert.deepEqual(p.hand, ["Mana Overflow"]);
+});
+test("Echoing Strikes makes both 0-energy attacks, if the active character shares a type", () => {
+  const S = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"]]); S.phase = "Main"; const [p,d] = S.players;
+  p.supports = ["Echoing Strikes"]; p.energy = 5; p.pos = d.pos = "7,0"; const h = d.hp;
+  Rules.attackFlow(S, 2, stubUi({ confirms:[true] })); assert.equal(h - d.hp, 4); assert.equal(p.energy, 5);
+  p.activeIdx = 2; assert.equal(Rules.echoingAvailable(p), false);
+});
+test("Echoing Strikes is optional", () => {
+  const S = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"]]); S.phase = "Main"; const [p,d] = S.players;
+  p.supports = ["Echoing Strikes"]; p.energy = 3; p.pos = d.pos = "7,0"; const h = d.hp;
+  Rules.attackFlow(S, 2, stubUi({ confirms:[false] })); assert.equal(h - d.hp, 7); assert.equal(p.energy, 0);
+});
+test("Echoing Strikes applies the effects of both attacks", () => {
+  const S = mkGame([["titan","berserker","cleric"],["archer","gambler","knight"]]); S.phase = "Main"; const [p,d] = S.players;
+  p.supports = ["Echoing Strikes"]; p.pos = d.pos = "7,0"; const [h,mine] = [d.hp,p.hp];
+  Rules.attackFlow(S, 0, stubUi({ confirms:[true] })); assert.equal(h - d.hp, 3+2); assert.equal(mine - p.hp, 1);
+});
+test("Blade Dance gives a free attack after an elimination", () => {
+  const S = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"],["titan","ballista","tactician"]]); S.phase = "Main"; const [p,d] = S.players;
+  card(S, "Blade Dance"); d.hp = 2; p.pos = d.pos = "7,0"; Rules.attackFlow(S, 0, stubUi({ picks:[1] }));
+  assert.equal(d.hp, 0); assert.equal(p.bonusAttack, true); assert.equal(Rules.allowed(S).attack, true);
+  const o = S.players[2], h = o.hp; o.pos = "7,0"; p.energy = 0;
+  assert.equal(Rules.attackFlow(S, 2, stubUi({})), "done"); assert.equal(h - o.hp, 7); assert.equal(p.bonusAttack, false); assert.equal(Rules.allowed(S).attack, false);
+});
+test("state survives a save and reload mid-turn", () => {
+  const S = brute(); S.phase = "Main"; card(S, "Unyielding Strength");
+  const R = JSON.parse(JSON.stringify(S));
+  assert.equal(R.phase, "Main"); assert.deepEqual(R.players[0].effects, S.players[0].effects);
+  assert.equal(Rules.isCompatibleSave(R), true);
+});
+test("Veilpiercer has no automatic effect yet", () => {
+  assert.equal(Rules.cardByName("Veilpiercer").apply, null); assert.match(Rules.cardByName("Veilpiercer").text, /No effect yet/);
+});
+
 test("space centres sit on the 3216px board grid", () => {
   assert.deepEqual([Rules.spaceXY(0,0).x, Math.round(Rules.spaceXY(15,15).y)], [250, 2968]);
 });

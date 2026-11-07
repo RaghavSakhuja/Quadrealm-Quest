@@ -67,72 +67,72 @@ const CARDS = [
   // --- Immediate / auto-resolving event cards ---
   { name:"Power Infusion", type:"event", text:"Your next attack this turn costs 1 less energy.",
     apply:a=>a.discount(1) },
-  { name:"Overload", type:"event", text:"Gain 3 energy, but take 2 self-damage.",
+  { name:"Overload", type:"event", text:"Gain 3 energy and take 2 self-damage.",
     apply:a=>{ a.energy(3); a.selfDmg(2); } },
-  { name:"Strategic Reserve", type:"event", text:"Gain 1 energy for every character type you have on the field.",
+  { name:"Strategic Reserve", type:"event", text:"Gain 1 energy for each different character type among your characters.",
     apply:a=>a.energy(a.distinctTypes()) },
   { name:"Medic's Touch", type:"event", text:"Heal 3 HP.", apply:a=>a.heal(3) },
-  { name:"Recovery Surge", type:"event", text:"Heal 5 HP, but skip your next movement phase.",
-    apply:a=>{ a.heal(5); a.log("  → remember to skip your next movement."); } },
-  { name:"Energizing Heal", type:"event", text:"Heal 1 HP per energy spent this turn.",
+  { name:"Recovery Surge", type:"event", text:"Heal 5 HP. You cannot move on your next turn.",
+    apply:a=>{ a.heal(5); a.noMove(); } },
+  { name:"Energizing Heal", type:"event", text:"Heal 1 HP for each energy you spent this turn.",
     apply:a=>a.heal(a.energySpent()) },
-  { name:"Divine Restoration", type:"event", text:"Heal HP equal to number of cards in hand.",
+  { name:"Divine Restoration", type:"event", text:"Heal HP equal to the number of cards in your hand.",
     apply:a=>a.heal(a.hand()) },
-  { name:"Ancient Knowledge", type:"event", text:"Draw 3 cards, then shuffle 2 from your hand back into the deck.",
+  { name:"Ancient Knowledge", type:"event", text:"Draw 3 cards, then shuffle 2 cards from your hand back into the deck.",
     apply:a=>{ a.draw(3); a.log("  → shuffle 2 cards from your hand back into the deck (do manually)."); } },
   { name:"Mana Overflow", type:"event", cls:"Mage", text:"Gain 2 energy.", apply:a=>a.energy(2) },
   { name:"Arrow Rain", type:"event", cls:"Long Range", text:"Deal 2 damage to every opponent within 3 spaces.",
-    apply:a=>a.aoeEnemies(2) },
+    apply:a=>a.rangeHit(3, 2) },
   // --- Movement / situational / triggered: resolved manually ---
   { name:"Hidden Shortcut", type:"event", text:"If you roll an even number this turn, double your movement.", apply:null },
-  { name:"Swift Footing", type:"event", text:"Move forward 1-3 extra spaces.", apply:null },
+  { name:"Swift Footing", type:"event", text:"Move forward 1–3 extra spaces.", apply:null },
   { name:"Teleport Rune", type:"event", text:"Swap places with an opponent within 3 spaces.", apply:null },
-  { name:"Dash Strike", type:"event", text:"Move forward 1 space and attack for 1 extra damage.", apply:null },
-  { name:"Falling Rocks", type:"event", text:"Target an opponent within 2 spaces; they lose their next movement phase.", apply:null },
-  { name:"Stolen Tactics", type:"event", text:"Copy the effect of the last played Event Card.", apply:null },
-  { name:"Distraction", type:"event", text:"Choose one opponent; they must discard 1 card.", apply:null },
-  { name:"Time Warp", type:"event", text:"Move forward 1 space, then roll a die. On 4-6, move another space.", apply:null },
-  { name:"Slowed by Fear", type:"event", text:"Move an opponent backward 2 spaces if their HP is lower than yours.", apply:null },
-  { name:"Momentum Breaker", type:"event", text:"If an opponent moves more than 3 spaces next, they lose 1 HP.", apply:null },
+  { name:"Dash Strike", type:"event", text:"Move forward 1 space, and your attack deals 1 extra damage.", apply:null },
+  { name:"Falling Rocks", type:"event", text:"Choose an opponent within 2 spaces. They cannot move on their next turn.", apply:a=>a.stopMove(2) },
+  { name:"Stolen Tactics", type:"event", text:"Copy the effect of the last event card played.", apply:null },
+  { name:"Distraction", type:"event", text:"Choose an opponent. They discard 1 card.", apply:null },
+  { name:"Time Warp", type:"event", text:"Move forward 1 space, then roll the die. On 4–6, move 1 more space.", apply:null },
+  { name:"Slowed by Fear", type:"event", text:"Move an opponent back 2 spaces if their HP is lower than yours.", apply:null },
+  { name:"Momentum Breaker", type:"event", text:"If an opponent moves more than 3 spaces on their next turn, they lose 1 HP.", apply:null },
   { name:"Blink Step", type:"event", text:"Swap spaces with an opponent less than 4 spaces away.", apply:null },
-  { name:"Armour of Thorns", type:"event", text:"Deal 1 damage back to attackers till your next turn.", apply:null },
+  { name:"Armour of Thorns", type:"event", text:"Until your next turn, anyone who attacks you takes 1 damage.", apply:null },
   // --- Class event cards (mostly triggered/situational → manual) ---
-  { name:"Quick Draw", type:"event", cls:"Long Range", text:"If you used a basic attack this turn, gain 1 energy.", apply:a=>a.energy(1) },
+  { name:"Quick Draw", type:"event", cls:"Long Range", text:"If you used a basic attack this turn, gain 1 energy.", apply:a=>a.addEffect({ card:"Quick Draw", until:"endOfTurn" }) },
   { name:"Longshot Gambit", type:"event", cls:"Long Range", text:"If you attack an opponent at least 6 spaces away, deal +1 damage.", apply:null },
-  { name:"Steady Aim", type:"event", cls:"Long Range", text:"Skip your movement this turn to deal +2 damage on your next attack.", apply:a=>a.log("  → +2 damage on your next attack (apply manually).") },
-  { name:"Explosive Arrows", type:"event", cls:"Long Range", text:"If you use an AOE attack this turn, it deals +1 damage to all targets.", apply:null },
-  { name:"Blade Dance", type:"event", cls:"Close Range", text:"If you defeat an opponent this turn, attack again for free.", apply:null },
-  { name:"Warrior's Endurance", type:"event", cls:"Close Range", text:"If you don't move this turn, heal 2 HP.", apply:a=>a.heal(2) },
-  { name:"Unshakable Resolve", type:"event", cls:"Close Range", text:"If you start your turn with less than 5 HP, gain 2 energy.", apply:a=>a.energy(2) },
-  { name:"Counterstrike", type:"event", cls:"Close Range", text:"If an opponent attacks you from <5 spaces next turn, they take 2 damage.", apply:null },
-  { name:"Restless Charge", type:"event", cls:"Close Range", text:"Move 2 extra spaces, but your next attack must target an enemy within 3 spaces.", apply:null },
-  { name:"Lifeblood Ritual", type:"event", cls:"Mage", text:"If your skill attack heals, restore 1 extra HP.", apply:null },
-  { name:"Mystic Insight", type:"event", cls:"Mage", text:"Draw 2 cards if you don't attack this turn.", apply:a=>a.draw(2) },
+  { name:"Steady Aim", type:"event", cls:"Long Range", text:"Skip your movement this turn, and your next attack deals +2 damage.", apply:a=>a.steadyAim() },
+  { name:"Explosive Arrows", type:"event", cls:"Long Range", text:"If you use an area attack this turn, it deals +1 damage to every target.", apply:null },
+  { name:"Blade Dance", type:"event", cls:"Close Range", text:"If you eliminate an opponent this turn, attack again for free.", apply:a=>a.addEffect({ card:"Blade Dance", until:"endOfTurn" }) },
+  { name:"Warrior's Endurance", type:"event", cls:"Close Range", text:"If you don't move this turn, heal 2 HP.", apply:a=>a.addEffect({ card:"Warrior's Endurance", until:"endOfTurn" }) },
+  { name:"Unshakable Resolve", type:"event", cls:"Close Range", text:"If you start your turn with less than 5 HP, gain 2 energy.", apply:a=>{ if(a.p.startTurnHp<5) a.energy(2); else a.log("  → you started this turn with 5 HP or more: no effect."); } },
+  { name:"Counterstrike", type:"event", cls:"Close Range", text:"Until your next turn, an opponent who attacks you from less than 5 spaces away takes 2 damage.", apply:null },
+  { name:"Restless Charge", type:"event", cls:"Close Range", text:"Move 2 extra spaces. Your next attack must target an opponent within 3 spaces.", apply:null },
+  { name:"Lifeblood Ritual", type:"event", cls:"Mage", text:"If your skill attack heals, it restores 1 extra HP.", apply:null },
+  { name:"Mystic Insight", type:"event", cls:"Mage", text:"If you don't attack this turn, draw 2 cards.", apply:a=>a.addEffect({ card:"Mystic Insight", until:"endOfTurn" }) },
   { name:"Magic Barrier", type:"event", cls:"Mage", text:"The next attack against you deals half damage.", apply:null },
   { name:"Teleport Spell", type:"event", cls:"Mage", text:"Move to any unoccupied space within 3 spaces.", apply:null },
-  { name:"Unyielding Strength", type:"event", cls:"Brute", text:"Take 2 less damage from the next attack this turn.", apply:null },
-  { name:"Titanic Slam", type:"event", cls:"Brute", text:"If you use an ultimate attack this turn, all opponents take 2 damage.", apply:null },
-  { name:"Adrenaline Rush", type:"event", cls:"Brute", text:"If you take 5+ damage in a turn, gain 3 energy.", apply:a=>a.energy(3) },
-  { name:"Battle Roar", type:"event", cls:"Brute", text:"If you have less than 10 HP, your next attack costs 1 less energy.", apply:a=>a.discount(1) },
-  { name:"Colossus Stance", type:"event", cls:"Brute", text:"You take up to 3 less self damage this turn.", apply:null },
-  // --- Support cards (equip system not modeled; shown as playable text) ---
-  { name:"Arcane Efficiency", type:"support", text:"Skill energy cost -1.", apply:null },
-  { name:"The Titan's Gauntlet", type:"support", text:"Base attack does +1 damage.", apply:null },
-  { name:"Warrior's Reclamation", type:"support", text:"For every 4 damage dealt, gain 1 energy.", apply:null },
-  { name:"Alchemist's Exchange", type:"support", text:"Base does no damage; instead gives that much energy /2 (floor).", apply:null },
-  { name:"Soul Battery", type:"support", text:"Converts all healing to energy (2:1).", apply:null },
+  { name:"Unyielding Strength", type:"event", cls:"Brute", text:"Take 2 less damage from the next attack against you before your next turn.", apply:a=>a.addEffect({ card:"Unyielding Strength", until:"nextTurn" }) },
+  { name:"Titanic Slam", type:"event", cls:"Brute", text:"If you use an ultimate attack this turn, every opponent takes 2 damage.", apply:null },
+  { name:"Adrenaline Rush", type:"event", cls:"Brute", text:"If you take 5 or more damage before your next turn, gain 3 energy.", apply:a=>a.addEffect({ card:"Adrenaline Rush", until:"nextTurn" }) },
+  { name:"Battle Roar", type:"event", cls:"Brute", text:"If you have less than 10 HP, your next attack costs 1 less energy.", apply:a=>{ if(a.p.hp<10) a.discount(1); else a.log("  → you have 10 HP or more: no effect."); } },
+  { name:"Colossus Stance", type:"event", cls:"Brute", text:"You take up to 3 less self-damage this turn.", apply:null },
+  // --- Support cards (only those named in the rules code have an effect; the rest show their text) ---
+  { name:"Arcane Efficiency", type:"support", text:"Your skill attacks cost 1 less energy.", apply:null },
+  { name:"The Titan's Gauntlet", type:"support", text:"Your basic attacks deal +1 damage.", apply:null },
+  { name:"Warrior's Reclamation", type:"support", text:"For every 4 damage you deal, gain 1 energy.", apply:null },
+  { name:"Alchemist's Exchange", type:"support", text:"Your basic attacks deal no damage. Instead, gain energy equal to half that damage, rounded down.", apply:null },
+  { name:"Soul Battery", type:"support", text:"Convert all healing you receive into energy, at 2 healing per 1 energy.", apply:null },
   { name:"Priestess' Blessing", type:"support", text:"At the end of your turn, heal 1 HP.", apply:null },
   { name:"Veilpiercer", type:"support", text:"You may attack a non-active character, for half damage. (No effect yet: the designer is deciding this card.)", apply:null },
-  { name:"Enchanted Library", type:"support", text:"Expend 2 energy to draw 1 additional card.", apply:a=>{ if(a.p.energy>=2){ a.energy(-2); a.draw(1); } else a.log("  → need 2 energy."); } },
-  { name:"Echoing Strikes", type:"support", text:"If you have 2 characters of the same type, both attack but only use base damage.", apply:null },
-  { name:"Gambler's Favor", type:"support", text:"Roll the dice twice and choose your roll.", apply:null },
-  { name:"Critical Hit", type:"support", text:"If you roll 5-6 on movement, deal +2 damage on your next attack.", apply:null },
+  { name:"Enchanted Library", type:"support", text:"Spend 2 energy to draw 1 extra card.", apply:null },
+  { name:"Echoing Strikes", type:"support", text:"If 2 of your characters share a type, both attack, dealing base damage only.", apply:null },
+  { name:"Gambler's Favor", type:"support", text:"Roll the die twice and choose which roll to use.", apply:null },
+  { name:"Critical Hit", type:"support", text:"If you roll 5 or 6 for movement, your next attack deals +2 damage.", apply:null },
   { name:"Steady March", type:"support", text:"You may move exactly 3 spaces instead of rolling.", apply:null },
-  { name:"Refined Strategy", type:"support", text:"Once per turn, discard a card to draw a new one.", apply:null },
+  { name:"Refined Strategy", type:"support", text:"Once per turn, you may discard a card to draw a new one.", apply:null },
   { name:"Endurance Training", type:"support", text:"If you don't attack this turn, heal 3 HP.", apply:null },
-  { name:"Sharpened Reflexes", type:"support", text:"If you roll a 1 or 2, gain 1 energy.", apply:null },
-  { name:"Steady Aim (Archer)", type:"support", cls:"Long Range", text:"If you don't move this turn, reduce your next attack cost by 1.", apply:null },
-  { name:"Duelist's Challenge", type:"support", cls:"Close Range", text:"If you land on an opponent's space, your next attack deals +2 damage.", apply:null },
+  { name:"Sharpened Reflexes", type:"support", text:"If you roll 1 or 2 for movement, gain 1 energy.", apply:null },
+  { name:"Steady Aim (Archer)", type:"support", cls:"Long Range", text:"Long Range only. If you don't move this turn, your next attack costs 1 less energy.", apply:null },
+  { name:"Duelist's Challenge", type:"support", cls:"Close Range", text:"Close Range only. If you land on an opponent's space, your next attack deals +2 damage.", apply:null },
   { name:"Calculated Strategy", type:"support", text:"If you play no cards this turn, draw 1 extra card.", apply:null },
   { name:"Teleportation Spell", type:"support", cls:"Mage", text:"If your active character is a Mage, you may teleport up to 3 spaces instead of moving normally.", apply:null },
   { name:"Stone Fortress", type:"support", text:"If you have 2 Brutes, you take 1 less damage from all attacks.", apply:null },
@@ -180,6 +180,7 @@ function combatDamage({ base, attacker, defender, kind, isArea }){
   if(kind==="basic" && attacker.supports.includes("The Titan's Gauntlet")) dmg += 1;
   dmg += spaceDamageBonus(attacker.pos, kind);
   dmg += attacker.nextAttackBonus;
+  if(effectActive(defender, "Unyielding Strength")) dmg -= 2;
   return Math.max(0, dmg);
 }
 function startRegen(p){
@@ -346,7 +347,7 @@ function createPlayer({ name, color, charIds, activeIdx=0 }){
   const maxHp = chars.reduce((s,c)=>s+c.hp, 0);
   return { name, color, chars, activeIdx, hp:maxHp, maxHp, energy:0, hand:[], supports:[], effects:[], pos:START_SPACE, trail:[],
     actionUsed:false, attackedThisTurn:false, usedBasicThisTurn:false, movedThisTurn:false, noMoveNext:false, out:false,
-    attackDiscount:0, nextAttackBonus:0, energySpentThisTurn:0, doubleUsedAt:null };
+    attackDiscount:0, nextAttackBonus:0, bonusAttack:false, energySpentThisTurn:0, doubleUsedAt:null };
 }
 
 /* ---- Targeting ---- */
@@ -388,11 +389,11 @@ function settleTurn(S, ui){
 function allowed(S){
   const main = S.phase==="Main", done = S.winner!=null;
   if(done) return { roll:false, cards:false, switchChar:false, attack:false, end:false, events:false };
-  return { roll: S.phase==="Move" || (main && !!S.debug), cards:main, switchChar:main, attack:main, end:main || S.phase==="After", events:true };
+  return { roll: S.phase==="Move" || (main && !!S.debug), cards:main, switchChar:main, attack:main || !!S.players[S.current].bonusAttack, end:main || S.phase==="After", events:true };
 }
 function startTurn(S, ui){
   const p = S.players[S.current];
-  Object.assign(p, { movedThisTurn:false, actionUsed:false, attackedThisTurn:false, usedBasicThisTurn:false, energySpentThisTurn:0, attackDiscount:0, nextAttackBonus:0 });
+  Object.assign(p, { movedThisTurn:false, actionUsed:false, attackedThisTurn:false, usedBasicThisTurn:false, energySpentThisTurn:0, attackDiscount:0, nextAttackBonus:0, bonusAttack:false, effects:[] });
   p.energy += 1;
   drawCards(S, p, 1);
   say(S, `${p.name}'s turn: +1 energy (now ${p.energy}), drew a card.`);
@@ -418,6 +419,7 @@ function switchActive(S, idx){
 }
 function endTurn(S, ui){
   const p = S.players[S.current];
+  if(!isOut(p)) resolveEndOfTurn(S, p);
   if(!isOut(p) && p.supports.includes("Priestess' Blessing")){ const h = heal(p, 1); say(S, `  → Priestess' Blessing heals ${h}.`); }
   for(let k=1;k<=S.players.length;k++){
     const i = (S.current+k) % S.players.length;
@@ -440,20 +442,31 @@ function pickOpponent(S, ui, title){
   if(opts.length<=1) return opts.length ? opts[0] : null;
   return ui.choosePlayer(opts, title);
 }
-function dealDamage(S, d, n){ loseHp(d, n); say(S, `  → ${d.name} takes ${n}.`); }
+function noteDamage(S, p, n){   // Adrenaline Rush adds up damage until the owner's next turn
+  const e = p.effects.find(x=>x.card==="Adrenaline Rush");
+  if(!e || !effectActive(p, "Adrenaline Rush")) return;
+  e.taken = (e.taken||0) + n;
+  if(e.taken>=5){ p.energy += 3; p.effects = p.effects.filter(x=>x!==e); say(S, `  → Adrenaline Rush: ${p.name} gains 3 energy.`); }
+}
+function takeDamage(S, d, n){ loseHp(d, n); say(S, `  → ${d.name} takes ${n}.`); noteDamage(S, d, n); }
+function takeSelfDamage(S, p, n){
+  const took = selfDamage(p, n);
+  say(S, took ? `  → ${p.name} takes ${n} self-damage.` : `  → ${p.name} ignores ${n} self-damage (Unyielding Fury).`);
+  if(took) noteDamage(S, p, took);
+}
 // Resolve one attack that has already been paid for.
-function resolveAttack(S, atkIndex, target, roll, energyUsed, ui){
-  const p = S.players[S.current], atk = activeChar(p).attacks[atkIndex];
+function resolveAttack(S, atkIndex, target, roll, energyUsed, ui, char){
+  const p = S.players[S.current], who = char || activeChar(p), atk = who.attacks[atkIndex], hits = [];
   const kind = ["basic","skill","ultimate"][atkIndex], isArea = !!atk.area;
   const molten = activeType(p)==="Mage" && realmOf(p.pos)==="Volcano";
   const others = (keep)=> opponents(S, S.current).map(i=>S.players[i]).filter(keep);
-  const strike = (d, n)=>{ const dmg = combatDamage({ base:n, attacker:p, defender:d, kind, isArea }); dealDamage(S, d, dmg); return dmg; };
+  const strike = (d, n)=>{ const dmg = combatDamage({ base:n, attacker:p, defender:d, kind, isArea }); takeDamage(S, d, dmg); hits.push(d); return dmg; };
   let moltenPool = 0;
   const healSelf = (n)=>{
     if(molten){ moltenPool += n; return; }
     const h = heal(p, n); say(S, `  → ${p.name} heals ${h} (now ${p.hp}/${p.maxHp}).`);
   };
-  say(S, `${p.name}'s ${activeChar(p).name} uses ${atk.name} (-${energyUsed}⚡).`);
+  say(S, `${p.name}'s ${who.name} uses ${atk.name} (-${energyUsed}⚡).`);
   atk.resolve({
     player:p, target, roll, energyUsed, targetMoved: !!(target && target.movedThisTurn),
     hit(n){ if(target) strike(target, n); },
@@ -461,9 +474,9 @@ function resolveAttack(S, atkIndex, target, roll, energyUsed, ui){
     drain(n, healEach){ const realm = realmOf(p.pos); if(realm) others(o=>realmOf(o.pos)===realm).forEach(o=>{ strike(o, n); healSelf(healEach); }); },
     hitAll(n){ others(()=>true).forEach(o=>strike(o, n)); },
     steal(n){ if(!target) return; const dealt = Math.min(combatDamage({ base:n, attacker:p, defender:target, kind, isArea }), target.hp);
-      dealDamage(S, target, dealt); healSelf(dealt); },
+      takeDamage(S, target, dealt); hits.push(target); healSelf(dealt); },
     heal: healSelf,
-    selfDmg(n){ say(S, selfDamage(p, n) ? `  → ${p.name} takes ${n} self-damage.` : `  → ${p.name} ignores ${n} self-damage (Unyielding Fury).`); },
+    selfDmg(n){ takeSelfDamage(S, p, n); },
     draw(n){ drawCards(S, p, n); },
     noMove(o){ o.noMoveNext = true; say(S, `  → ${o.name} cannot move next turn.`); },
     swap(){ [p.pos,p.trail,target.pos,target.trail] = [target.pos,target.trail,p.pos,p.trail]; p.doubleUsedAt = target.doubleUsedAt = null; say(S, `  → swapped pieces with ${target.name}.`); },
@@ -472,42 +485,113 @@ function resolveAttack(S, atkIndex, target, roll, energyUsed, ui){
   if(moltenPool>0){   // Molten Power: the attack's healing becomes one hit, with no modifiers
     let to = target;
     if(!to || isOut(to)){ const pi = pickOpponent(S, ui, "Molten Power: which opponent?"); to = pi==null ? null : S.players[pi]; }
-    if(to) dealDamage(S, to, moltenDamage(moltenPool));
+    if(to) takeDamage(S, to, moltenDamage(moltenPool));
   }
+  return hits;
 }
 function relentlessApplies(S, p){
   return !isOut(p) && activeType(p)==="Brute" && realmOf(p.pos)==="Mountain" && opponents(S, S.current).length>0;
 }
+// The active character must be one of the two sharing a type.
+function echoingAvailable(p){
+  if(!p.supports.includes("Echoing Strikes")) return false;
+  return p.chars.some((c,i)=>i!==p.activeIdx && typeOf(c.id)===activeType(p));
+}
 // Target first, then roll, then pay: cancelling can never give a free reroll.
 function attackFlow(S, atkIndex, ui){
-  const p = S.players[S.current], atk = activeChar(p).attacks[atkIndex];
+  const p = S.players[S.current], atk = activeChar(p).attacks[atkIndex], free = !!p.bonusAttack;
   const rollSetsCost = atk.needsRoll && atk.costOf;
-  if(!rollSetsCost && p.energy<attackCost(p, atkIndex, null, false)) return "cancelled";
+  const echo = !free && echoingAvailable(p) && ui.confirm("Use Echoing Strikes? Both characters make their 0-energy attack instead.");
+  if(!echo && !rollSetsCost && p.energy<attackCost(p, atkIndex, null, free)) return "cancelled";
+  const strikers = echo ? p.chars.filter((c,i)=>i===p.activeIdx || typeOf(c.id)===activeType(p)).sort((a,b)=>(b===activeChar(p))-(a===activeChar(p))).slice(0,2) : [activeChar(p)];
+  const index = echo ? 0 : atkIndex;
   let target = null;
-  if(atk.target==="enemy"){
+  if(strikers.some(c=>c.attacks[index].target==="enemy")){
     const pi = pickOpponent(S, ui, `${atk.name}: attack which player?`);
     if(pi==null) return "cancelled";
     target = S.players[pi];
   }
-  const roll = atk.needsRoll ? ui.roll() : null;
-  if(roll!=null) say(S, `🎲 ${p.name} rolled ${roll}.`);
-  const cost = attackCost(p, atkIndex, roll, false);
-  p.actionUsed = true; S.phase = "After";
+  const rollFor = (a)=>{ if(!a.needsRoll) return null; const r = ui.roll(); say(S, `🎲 ${p.name} rolled ${r}.`); return r; };
+  const firstRoll = rollFor(strikers[0].attacks[index]);
+  const cost = echo ? 0 : attackCost(p, index, firstRoll, free);
+  p.actionUsed = true; p.bonusAttack = false; S.phase = "After";
   if(p.energy<cost){ say(S, `${p.name} can't afford ${atk.name} (needs ${cost}): no attack.`); return "unaffordable"; }
-  p.energy -= cost; p.energySpentThisTurn += cost; p.attackDiscount = 0;
-  p.attackedThisTurn = true; if(atkIndex===0) p.usedBasicThisTurn = true;
-  resolveAttack(S, atkIndex, target, roll, cost, ui);
+  p.energy -= cost; p.energySpentThisTurn += cost; if(!free) p.attackDiscount = 0;
+  p.attackedThisTurn = true; if(index===0) p.usedBasicThisTurn = true;
+  const hits = [];
+  strikers.forEach((c,i)=>{ hits.push(...resolveAttack(S, index, target, i===0 ? firstRoll : rollFor(c.attacks[index]), cost, ui, c)); });
   p.nextAttackBonus = 0;
+  hits.forEach(d=>{ d.effects = d.effects.filter(e=>e.card!=="Unyielding Strength"); });   // it blocks one attack
   if(relentlessApplies(S, p)){   // Relentless Assault: mandatory, free, may pick a new target, no retrigger
     say(S, "Relentless Assault: a free skill attack.");
     const pi = activeChar(p).attacks[1].target==="enemy" ? pickOpponent(S, ui, "Relentless Assault: attack which player?") : null;
     resolveAttack(S, 1, pi==null ? null : S.players[pi], null, 0, ui);
   }
+  const killed = S.players.some((o,i)=>i!==S.current && isOut(o) && !o.out);
+  if(killed && !isOut(p) && effectActive(p, "Blade Dance")){   // Blade Dance: one free attack
+    p.effects = p.effects.filter(e=>e.card!=="Blade Dance"); p.bonusAttack = true;
+    say(S, "Blade Dance: attack again for free.");
+  }
   settleTurn(S, ui);
   return "done";
 }
 
-const Rules = { settle, settleTurn, attackFlow, attackCost, moltenDamage, allowed, startTurn, roll, skipMove, switchActive, endTurn, opponents, isOut, ROSTER, TERRAINS, CARDS, CARD_POOL, cardByName, buildDeck, shuffle, drawCards, say,
+/* ---- Event cards ---- */
+function typeActive(p, def){ return !def.cls || activeType(p)===def.cls; }
+function effectActive(p, name){ return p.effects.some(e=>e.card===name) && typeActive(p, cardByName(name)); }
+function addEffect(p, e){ p.effects.push({ ...e }); }
+const END_OF_TURN = {
+  "Quick Draw":(S,p)=>{ if(p.usedBasicThisTurn){ p.energy += 1; say(S, `  → Quick Draw: ${p.name} gains 1 energy.`); } },
+  "Warrior's Endurance":(S,p)=>{ if(!p.movedThisTurn){ const h = heal(p, 2); say(S, `  → Warrior's Endurance heals ${h}.`); } },
+  "Mystic Insight":(S,p)=>{ if(!p.attackedThisTurn){ drawCards(S, p, 2); say(S, `  → Mystic Insight: ${p.name} draws 2.`); } },
+};
+function resolveEndOfTurn(S, p){
+  p.effects.filter(e=>e.until==="endOfTurn").forEach(e=>{ if(END_OF_TURN[e.card] && effectActive(p, e.card)) END_OF_TURN[e.card](S, p); });
+  p.effects = p.effects.filter(e=>e.until!=="endOfTurn");
+}
+function eventApi(S, p, ui){
+  const pi = S.players.indexOf(p);
+  return { p,
+    energy(n){ p.energy = Math.max(0, p.energy + n); },
+    heal(n){ const h = heal(p, n); say(S, `  → ${p.name} heals ${h} (now ${p.hp}/${p.maxHp}).`); },
+    selfDmg(n){ takeSelfDamage(S, p, n); },
+    draw(n){ drawCards(S, p, n); },
+    hand(){ return p.hand.length; },
+    distinctTypes(){ return distinctTypes(p); },
+    energySpent(){ return p.energySpentThisTurn; },
+    discount(n){ p.attackDiscount += n; },
+    addEffect(e){ addEffect(p, e); },
+    noMove(){ p.noMoveNext = true; say(S, `  → ${p.name} cannot move next turn.`); },
+    stopMove(range){
+      const opts = withinRange(S, pi, range);
+      if(!opts.length){ say(S, `  → no opponent within ${range} spaces.`); return; }
+      const t = opts.length>1 ? ui.choosePlayer(opts, `Stop which opponent within ${range} spaces?`) : opts[0];
+      if(t!=null){ S.players[t].noMoveNext = true; say(S, `  → ${S.players[t].name} cannot move next turn.`); }
+    },
+    rangeHit(range, n){ withinRange(S, pi, range).forEach(i=>takeDamage(S, S.players[i], n)); },   // card damage is not an attack
+    steadyAim(){
+      if(S.phase!=="Move"){ say(S, "  → you've already moved: no effect."); return; }
+      skipMove(S); p.nextAttackBonus += 2; say(S, `  → ${p.name} skips moving; next attack +2.`);
+    },
+    log(m){ say(S, m); },
+  };
+}
+function playEvent(S, handIdx, ui){
+  const p = S.players[S.current], name = p.hand[handIdx], def = cardByName(name);
+  const works = typeActive(p, def);
+  if(!works && !ui.confirm(`${name} only works while your active character is ${def.cls}. Play it anyway for no effect?`)) return false;
+  p.hand.splice(handIdx, 1); S.discard.push(name);
+  say(S, `${p.name} played ${name}.`);
+  const twice = onDoubleSpace(p); if(twice) p.doubleUsedAt = p.pos;
+  if(!works) say(S, "  → no effect.");
+  else if(def.apply){ def.apply(eventApi(S, p, ui)); if(twice && S.winner==null){ say(S, "  → doubled:"); def.apply(eventApi(S, p, ui)); } }
+  else say(S, twice ? "  → apply this card's text by hand, twice." : "  → apply this card's text by hand.");
+  S.lastEvent = name;
+  settleTurn(S, ui);
+  return true;
+}
+
+const Rules = { takeDamage, echoingAvailable, typeActive, addEffect, playEvent, settle, settleTurn, attackFlow, attackCost, moltenDamage, allowed, startTurn, roll, skipMove, switchActive, endTurn, opponents, isOut, ROSTER, TERRAINS, CARDS, CARD_POOL, cardByName, buildDeck, shuffle, drawCards, say,
   typeOf, activeChar, activeType, distinctTypes, loseHp, selfDamage, heal,
   combatDamage, startRegen,
   SAVE_VERSION, isCompatibleSave, createPlayer,

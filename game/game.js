@@ -4,9 +4,9 @@ const ASSET = {
 };
 const SAVE_KEY = "quadrealm_save_v4";
 
-const { ROSTER, CARDS, CARD_POOL, cardByName, buildDeck, shuffle, drawCards, say, typeOf, activeChar, activeType, distinctTypes,
-  isOut, loseHp, selfDamage, heal, SAVE_VERSION, isCompatibleSave, createPlayer, opponents,
-  SPACES, realmOf, spaceLabel, allowed, attackCost, onDoubleSpace } = Rules;
+const { ROSTER, cardByName, buildDeck, shuffle, drawCards, say, typeOf, activeChar,
+  isOut, loseHp, SAVE_VERSION, isCompatibleSave, createPlayer,
+  SPACES, spaceLabel, allowed, attackCost } = Rules;
 
 const PLAYER_COLORS = ["#e6b450","#58c6ff","#68d391","#ff6b6b"];
 
@@ -194,17 +194,6 @@ const ui = {
 };
 
 /* ========================= ACTIONS ========================= */
-function dealSelfDamage(p, amount){
-  const took = selfDamage(p, amount);
-  log(took ? `  → ${p.name} takes ${amount} self-damage.` : `  → ${p.name} ignores ${amount} self-damage (Unyielding Fury).`);
-  render(); renderTokens();
-}
-function healPlayer(p, amount){
-  const h = heal(p, amount);
-  log(`  → ${p.name} heals ${h} (now ${p.hp}/${p.maxHp}).`);
-  render(); renderTokens();
-}
-
 function promptChoice(choices, title="Choose target:"){
   if(choices.length===0){ alert("No valid targets."); return null; }
   if(choices.length===1) return choices[0];
@@ -257,11 +246,13 @@ function render(){
   panel.appendChild(h(`<div class="section"><b>Your piece</b></div>`));
   panel.appendChild(h(`<div style="font-size:12px">${spaceLabel(p.pos)}</div>`));
 
+  if(p.effects.length) panel.appendChild(h(`<div style="font-size:11px;color:var(--good)">Active: ${p.effects.map(e=>e.card).join(" · ")}</div>`));
+
   // Only the active character attacks.
   panel.appendChild(h(`<div class="section"><b>Attacks — ${activeChar(p).name}</b></div>`));
   const atkWrap = h(`<div class="attacks"></div>`);
   activeChar(p).attacks.forEach((a,ai)=>{
-    const cost = attackCost(p, ai, null, false), costLabel = a.costOf ? "*" : cost;   // * = cost depends on roll/energy
+    const cost = attackCost(p, ai, null, !!p.bonusAttack), costLabel = a.costOf ? "*" : cost;   // * = cost depends on roll/energy
     const row = h(`<div class="atk"><span>${a.name} <span style="color:var(--muted)">— ${a.note}</span></span><span class="cost">${costLabel}⚡</span></div>`);
     const use = btn("Use", ()=> useAttack(ai));
     use.disabled = !can.attack || (!a.costOf && p.energy < cost);   // a cost set by the roll is checked at resolve time
@@ -347,23 +338,8 @@ function buildDamageHelper(){   // Debug only; acts on team HP and cannot bring 
   return wrap;
 }
 
-/* --- Card modal + effect engine --- */
+/* --- Card modal --- */
 let openCardIdx = null;
-function cardApi(p){
-  return {
-    p,
-    energy(n){ p.energy = Math.max(0, p.energy + n); },
-    heal(n){ healPlayer(p, n); },
-    selfDmg(n){ dealSelfDamage(p, n); },
-    draw(n){ drawCard(p, n); },
-    hand(){ return p.hand.length; },
-    distinctTypes(){ return distinctTypes(p); },
-    energySpent(){ return p.energySpentThisTurn || 0; },
-    discount(n){ p.attackDiscount = (p.attackDiscount||0) + n; },
-    aoeEnemies(n){ opponents(S, S.current).forEach(pi=>{ loseHp(S.players[pi], n); log(`  → ${S.players[pi].name} takes ${n}.`); }); },
-    log(m){ log(m); },
-  };
-}
 function openCard(card, idx){
   openCardIdx = idx;
   const def = cardByName(card);
@@ -388,15 +364,9 @@ $("#cardPlay").onclick = ()=>{
     p.supports.push(name);
     log(`${p.name} equipped support: ${name}.`);
   } else {
-    p.hand.splice(openCardIdx, 1);
-    S.discard.push(name);
-    log(`${p.name} played ${name}.`);
-    const twice = onDoubleSpace(p); if(twice) p.doubleUsedAt = p.pos;   // "Next Event Card Effect Doubled" space
-    if(def && def.apply){ def.apply(cardApi(p)); if(twice){ log("  → doubled:"); def.apply(cardApi(p)); } }
-    else if(twice) log("  → doubled: apply this card's effect twice.");
+    Rules.playEvent(S, openCardIdx, ui);
   }
   $("#cardModal").classList.add("hidden");
-  Rules.settleTurn(S, ui);
   refresh();
 };
 
