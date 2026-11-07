@@ -2,10 +2,24 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const Rules = require("../rules.js");
 
-test("classOf maps every roster character", () => {
-  const want = { archer:"Marksmen", ballista:"Marksmen", knight:"Swordsmen", samurai:"Swordsmen",
-    cleric:"Mages", necromancer:"Mages", berserker:"Brutes", titan:"Brutes", gambler:"Neutral", tactician:"Neutral" };
-  for (const r of Rules.ROSTER) assert.equal(Rules.classOf(r.id), want[r.id], r.id);
+/* ---- Helpers ---- */
+const mkGame = (charIdsPerPlayer, overrides={}) => ({ version:Rules.SAVE_VERSION,
+  players: charIdsPerPlayer.map((charIds, i) => Rules.createPlayer({ name:`P${i+1}`, color:"#fff", charIds, activeIdx:0 })),
+  deck: Rules.buildDeck(), discard: [], current: 0, phase: "Main", log: [], ...overrides });
+// Scripted player: answers come from picks/rolls/confirms in order; prompts are recorded in asked.
+const stubUi = ({ picks=[], rolls=[], confirms=[] }={}) => { const ui = { asked:[], rollCount:0,
+  roll(){ ui.rollCount++; return rolls.length ? rolls.shift() : 1; },
+  confirm(t){ ui.asked.push(t); return confirms.length ? confirms.shift() : false; },
+  choosePlayer(pis, t){ ui.asked.push(t); return picks.length ? picks.shift() : pis[0]; },
+  chooseLane(choices, t){ ui.asked.push(t); return picks.length ? picks.shift() : choices[0]; },
+  chooseCard(hand, t){ ui.asked.push(t); return picks.length ? picks.shift() : 0; },
+  chooseChar(p, t){ ui.asked.push(t); return picks.length ? picks.shift() : null; } };
+  return ui; };
+
+test("typeOf uses the rulebook's names", () => {
+  const want = { archer:"Long Range", ballista:"Long Range", knight:"Close Range", samurai:"Close Range",
+    cleric:"Mage", necromancer:"Mage", berserker:"Brute", titan:"Brute", gambler:"Wildcard", tactician:"Wildcard" };
+  for (const r of Rules.ROSTER) assert.equal(Rules.typeOf(r.id), want[r.id], r.id);
   assert.equal(Rules.ROSTER.length, 10);
 });
 test("roster HP matches the rulebook", () => {
@@ -27,48 +41,56 @@ test("Natural Cover: Marksmen take -2 in Forest, never below 0", () => {
   assert.equal(cd({ base:2, defenderId:"archer", defenderTerrain:"Forest" }), 0);
   assert.equal(cd({ base:1, defenderId:"archer", defenderTerrain:"Forest" }), 0);
 });
-test("Unyielding Fury: Brutes ignore self-damage in Hot Spring, includes Titan", () => {
-  assert.equal(Rules.selfDamageAfterTerrain("titan", "Hot Spring", 3), 0);
-  assert.equal(Rules.selfDamageAfterTerrain("titan", "Forest", 3), 3);
+test("Unyielding Fury needs an active Brute in Hot Spring", () => {
+  const p = Rules.createPlayer({ name:"P", color:"#fff", charIds:["titan","knight","cleric"], activeIdx:0 });
+  p.pos = "0,5"; Rules.selfDamage(p, 3); assert.equal(p.hp, p.maxHp);
+  p.activeIdx = 1; Rules.selfDamage(p, 3); assert.equal(p.hp, p.maxHp - 3);
 });
-test("Rejuvenating Waters: Mages +1 healing in Hot Spring", () => {
-  assert.equal(Rules.healAfterTerrain("necromancer", "Hot Spring", 5), 6);
-  assert.equal(Rules.healAfterTerrain("knight", "Hot Spring", 5), 5);
+test("healing stops at starting HP; +1 only for an active Mage in Hot Spring", () => {
+  const p = Rules.createPlayer({ name:"P", color:"#fff", charIds:["cleric","knight","titan"], activeIdx:0 });
+  p.hp = 70; p.pos = "0,5"; assert.equal(Rules.heal(p, 2), 3); assert.equal(p.hp, 73);
+  p.activeIdx = 1; p.hp = 79; assert.equal(Rules.heal(p, 5), 1); assert.equal(p.hp, 80);
 });
-test("Forager's Resilience: Swordsmen regen 2 in Forest", () => {
-  assert.equal(Rules.startRegen("samurai", "Forest"), 2);
-  assert.equal(Rules.startRegen("archer", "Forest"), 0);
+test("Forager's Resilience needs an active Close Range in Forest", () => {
+  const p = Rules.createPlayer({ name:"P", color:"#fff", charIds:["knight","samurai","titan"], activeIdx:0 });
+  p.pos = "15,10"; assert.equal(Rules.startRegen(p), 2);
+  p.activeIdx = 2; assert.equal(Rules.startRegen(p), 0);
+});
+test("Strategic Reserve counts distinct types, not ids", () => {
+  const p = Rules.createPlayer({ name:"P", color:"#fff", charIds:["knight","samurai","titan"], activeIdx:0 });
+  assert.equal(Rules.distinctTypes(p), 2);
 });
 
-test("createPlayer puts the piece on Embark, not on the characters", () => {
-  const p = Rules.createPlayer({ name:"P1", color:"#fff", charIds:["knight","cleric","titan"], seat:1 });
-  assert.equal(p.pos, Rules.START_SPACE); assert.deepEqual(p.trail, []); assert.equal("x" in p, false);
-  assert.equal(p.energy, 0); assert.deepEqual(p.hand, []); assert.deepEqual(p.supports, []);
-  assert.deepEqual(p.chars.map(c => [c.id, c.curHp, c.alive]), [["knight",30,true],["cleric",15,true],["titan",35,true]]);
-  for (const c of p.chars) { assert.equal("x" in c, false); assert.equal("terrain" in c, false); }
+test("createPlayer pools HP on the player", () => {
+  const p = Rules.createPlayer({ name:"P", color:"#fff", charIds:["knight","cleric","titan"], activeIdx:1 });
+  assert.equal(p.hp, 80); assert.equal(p.maxHp, 80); assert.equal(Rules.activeChar(p).id, "cleric"); assert.equal(Rules.activeType(p), "Mage");
+  assert.equal(p.pos, Rules.START_SPACE); assert.equal(p.energy, 0); assert.deepEqual(p.hand, []); assert.deepEqual(p.effects, []);
+  assert.equal("curHp" in p.chars[0], false); assert.equal("alive" in p.chars[0], false);
 });
-test("isCompatibleSave rejects v1 and garbage", () => {
-  assert.equal(Rules.isCompatibleSave({ version:3, players:[] }), true);
-  assert.equal(Rules.isCompatibleSave({ players:[] }), false);
+test("isCompatibleSave rejects older versions and garbage", () => {
+  assert.equal(Rules.SAVE_VERSION, 4);
+  assert.equal(Rules.isCompatibleSave({ version:4, players:[] }), true);
+  assert.equal(Rules.isCompatibleSave({ version:3, players:[] }), false);
   assert.equal(Rules.isCompatibleSave(null), false);
-  assert.equal(Rules.isCompatibleSave({ version:3 }), false);
-});
-
-const mk = (alive) => ({ chars: alive.map((a, i) => ({ id:["knight","cleric","titan"][i], alive:a })) });
-test("livingChars returns only living characters", () => {
-  assert.deepEqual(Rules.livingChars(mk([true,false,true])).map(c => c.id), ["knight","titan"]);
+  assert.equal(Rules.isCompatibleSave({ version:4 }), false);
 });
 test("opponents skips the current player and eliminated players", () => {
-  const S = { players: [mk([true,true,true]), mk([false,false,false]), mk([false,true,false]), mk([true,true,true])] };
-  assert.deepEqual(Rules.opponents(S, 0), [2,3]);
-  assert.deepEqual(Rules.opponents(S, 3), [0,2]);
+  const S = mkGame([["knight","cleric","titan"],["archer","gambler","berserker"],["samurai","ballista","tactician"],["knight","cleric","titan"]]);
+  S.players[1].hp = 0;
+  assert.deepEqual(Rules.opponents(S, 0), [2,3]); assert.deepEqual(Rules.opponents(S, 3), [0,2]);
+  assert.equal(Rules.isOut(S.players[1]), true); assert.equal(Rules.isOut(S.players[0]), false);
 });
-test("hasLivingClass checks living characters only", () => {
-  assert.equal(Rules.hasLivingClass(mk([true,true,true]), "Mages"), true);
-  assert.equal(Rules.hasLivingClass(mk([true,false,true]), "Mages"), false);
+test("drawing with no cards left, or a full hand, is safe", () => {
+  const S = mkGame([["knight","cleric","titan"],["archer","gambler","berserker"]]);
+  S.deck = []; S.discard = []; Rules.drawCards(S, S.players[0], 2); assert.equal(S.players[0].hand.length, 0);
+  S.deck = ["a","b"]; S.players[0].hand = ["1","2","3","4","5","6"];
+  Rules.drawCards(S, S.players[0], 1); assert.equal(S.players[0].hand.length, 6); assert.equal(S.deck.length, 2);
 });
-test("veilpiercerDamage halves, rounding down", () => {
-  assert.equal(Rules.veilpiercerDamage(5), 2); assert.equal(Rules.veilpiercerDamage(1), 0);
+test("every type card is tagged with a rulebook type", () => {
+  assert.equal(Rules.cardByName("Mana Overflow").cls, "Mage"); assert.equal(Rules.cardByName("Arrow Rain").cls, "Long Range");
+  assert.equal(Rules.cardByName("Quick Draw").cls, "Long Range"); assert.equal(Rules.cardByName("Blade Dance").cls, "Close Range");
+  assert.equal(Rules.cardByName("Adrenaline Rush").cls, "Brute");
+  for (const c of Rules.CARDS) if (c.cls) assert.ok(["Long Range","Close Range","Mage","Brute"].includes(c.cls), c.name);
 });
 
 /* ---- Board model ---- */

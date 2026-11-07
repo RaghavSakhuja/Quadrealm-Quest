@@ -2,11 +2,10 @@
 const ASSET = {
   cards: "/assets/Cards/",
 };
-const SAVE_KEY = "quadrealm_save_v3";
+const SAVE_KEY = "quadrealm_save_v4";
 
-const { ROSTER, CARDS, CARD_POOL, cardByName, buildDeck, classOf,
-  combatDamage, selfDamageAfterTerrain, healAfterTerrain, startRegen, SAVE_VERSION, isCompatibleSave, createPlayer,
-  livingChars, opponents, hasLivingClass, veilpiercerDamage,
+const { ROSTER, CARDS, CARD_POOL, cardByName, buildDeck, shuffle, drawCards, say, typeOf, activeChar, activeType, distinctTypes,
+  isOut, loseHp, selfDamage, heal, combatDamage, startRegen, SAVE_VERSION, isCompatibleSave, createPlayer, opponents,
   SPACES, nextOptions, prevSpace, realmOf, SPACE_EFFECTS } = Rules;
 
 const PLAYER_COLORS = ["#e6b450","#58c6ff","#68d391","#ff6b6b"];
@@ -20,12 +19,7 @@ function newState(players) {
     scale: null, debug: false };
 }
 
-function shuffle(a) {
-  a = a.slice();
-  for (let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }
-  return a;
-}
-function log(msg){ S.log.unshift(msg); if(S.log.length>40) S.log.pop(); }
+function log(msg){ say(S, msg); }
 
 /* ========================= PERSISTENCE ========================= */
 function saveState(){
@@ -69,7 +63,15 @@ function renderSeats(){
     const d = document.createElement("div");
     d.className="seat";
     d.innerHTML = `<h3>${s.name} <span class="count">(${s.picks.length}/3)</span></h3>
-      <div>${s.picks.map(p=>ROSTER.find(r=>r.id===p).name).join(", ")||"<span style='color:var(--muted)'>no picks yet</span>"}</div>`;
+      <div>${s.picks.length ? "" : "<span style='color:var(--muted)'>no picks yet</span>"}</div>`;
+    s.picks.forEach((id,pi)=>{   // the highlighted pick starts as the active character
+      const pick = document.createElement("button");
+      pick.textContent = ROSTER.find(r=>r.id===id).name + (pi===(s.active||0) ? " ★" : "");
+      pick.className = pi===(s.active||0) ? "primary" : "ghost";
+      pick.title = "Start with this active character";
+      pick.onclick = ()=>{ s.active = pi; renderSeats(); };
+      d.appendChild(pick);
+    });
     const btn = document.createElement("button");
     btn.textContent = (i===setup.activeSeat)?"Drafting…":"Draft for this seat";
     btn.className = (i===setup.activeSeat)?"primary":"ghost";
@@ -91,7 +93,7 @@ function renderCharGrid(){
       <div class="nm">${c.name}</div><div class="hp">${c.hp} HP</div>`;
     d.onclick = ()=>{
       if(!seat) return;
-      if(picked){ seat.picks = seat.picks.filter(x=>x!==c.id); }
+      if(picked){ seat.picks = seat.picks.filter(x=>x!==c.id); seat.active = 0; }
       else if(seat.picks.length<3){ seat.picks.push(c.id); }
       renderSeats(); renderCharGrid(); updateStart();
     };
@@ -107,7 +109,7 @@ function updateStart(){
 $("#resetSetup").onclick = ()=>{ setup={playerCount:0,seats:[],activeSeat:0}; $("#pcLabel").textContent=""; $("#seats").innerHTML=""; $("#charGrid").innerHTML=""; updateStart(); };
 
 $("#startBtn").onclick = ()=>{
-  const players = setup.seats.map((s,pi)=>({ ...createPlayer({ name:s.name, color:PLAYER_COLORS[pi], charIds:s.picks, seat:pi }) }));
+  const players = setup.seats.map((s,pi)=>({ ...createPlayer({ name:s.name, color:PLAYER_COLORS[pi], charIds:s.picks, activeIdx:s.active||0 }) }));
   S = newState(players);
   enterGame();
   startTurn(true);
@@ -163,10 +165,8 @@ function startTurn(){
   p.attackDiscount = 0; p.energySpentThisTurn = 0;   // reset per-turn card modifiers
   p.movedThisTurn = false; p.rolledThisTurn = false; p.cantMove = false;
   if(p.noMoveNext){ log(`⛔ ${p.name} cannot move this turn.`); p.noMoveNext=false; p.cantMove=true; }
-  p.chars.forEach(c=>{
-    const regen = c.alive ? startRegen(c.id, terrainOf(c)) : 0;
-    if(regen){ c.curHp=Math.min(c.hp,c.curHp+regen); log(`${c.name} regenerates ${regen} HP (Forager's Resilience).`); }
-  });
+  const regen = startRegen(p);
+  if(regen){ heal(p, regen); log(`${p.name} regenerates ${regen} HP (Forager's Resilience).`); }
   drawCard(p, 1);
   log(`${p.name}'s turn — +1 energy (now ${p.energy}), drew a card.`);
   render();
@@ -174,12 +174,10 @@ function startTurn(){
 
 function endTurn(){
   const ending = S.players[S.current];
-  if(hasSupport(ending, "Priestess' Blessing")){   // end-of-turn heal
-    if(livingChars(ending).length){ healCharacter(chooseCharacter(S.current, "Priestess' Blessing: heal which character?"), 1); }
-  }
+  if(hasSupport(ending, "Priestess' Blessing") && !isOut(ending)) heal(ending, 1);   // end-of-turn heal
   let n = S.players.length, i = S.current;
-  for(let k=0;k<n;k++){ i=(i+1)%n; if(S.players[i].chars.some(c=>c.alive)){ S.current=i; break; } }
-  const alivePlayers = S.players.filter(p=>p.chars.some(c=>c.alive));
+  for(let k=0;k<n;k++){ i=(i+1)%n; if(!isOut(S.players[i])){ S.current=i; break; } }
+  const alivePlayers = S.players.filter(p=>!isOut(p));
   if(alivePlayers.length<=1){
     log(`🏆 ${alivePlayers[0]?.name||"Nobody"} wins!`);
     render();
@@ -189,17 +187,7 @@ function endTurn(){
   startTurn();
 }
 
-function drawCard(p, n){
-  for(let k=0;k<n;k++){
-    if(S.deck.length===0){
-      if(S.discard.length===0) return;
-      S.deck = shuffle(S.discard); S.discard=[];
-      log("Deck reshuffled from discard.");
-    }
-    if(p.hand.length>=6){ log(`${p.name} hand full (6).`); return; }
-    p.hand.push(S.deck.pop());
-  }
-}
+const drawCard = (p, n)=> drawCards(S, p, n);
 
 // Roll and move: once per turn (Debug allows more), then the final space's effect applies.
 function rollDice(){
@@ -248,7 +236,6 @@ function landOn(p){
   if(fx) fx(spaceApi(p));
 }
 function spaceApi(p){
-  const pi = S.players.indexOf(p);
   return {
     draw(n){ drawCard(p, n); },
     energy(n){ p.energy = Math.max(0, p.energy + n); },
@@ -257,9 +244,8 @@ function spaceApi(p){
       const pick = promptChoice(p.hand.map((c,i)=>({ i, label:c })), "Discard which card?") || { i:0 };
       const [c] = p.hand.splice(pick.i, 1); S.discard.push(c); log(`  → discarded ${c}.`);
     },
-    healChosen(n){ const c=chooseCharacter(pi, `Heal ${n}: which character?`); if(c) healCharacter(c, n); },
-    loseHpChosen(n){ const c=chooseCharacter(pi, `Lose ${n} HP: which character?`); const l=c&&locate(c);
-      if(l){ applyDamage(l.pi, l.ci, n); log(`  → ${c.name} loses ${n} HP.`); } },
+    heal(n){ const h=heal(p, n); log(`  → ${p.name} heals ${h}.`); render(); },
+    loseHp(n){ loseHp(p, n); log(`  → ${p.name} loses ${n} HP.`); render(); renderTokens(); },
     moveBack(n){ moveBack(p, n); log(`  → moved back to ${spaceLabel(p.pos)}.`); },   // that space does not trigger
     changeCharacter(){ changeCharacter(p); },
     dmgBuff(kind, n){ p.dmgBuffs[kind] += n; log(`  → next ${kind==="any"?"attack":kind+" attack"} deals +${n} damage.`); },
@@ -267,77 +253,42 @@ function spaceApi(p){
     doubleNextEvent(){ p.doubleEvent = true; log("  → next event card's effect is doubled."); },
   };
 }
-// Swap one living character for a character card nobody holds; it starts at full HP.
+// Free switch of the active character; does not use the action.
 function changeCharacter(p){
-  const held = new Set(S.players.flatMap(pl=>pl.chars.map(c=>c.id)));
-  const free = ROSTER.filter(r=>!held.has(r.id));
-  if(!free.length || !livingChars(p).length){ log("  → no character to change."); return; }
-  if(!confirm(`${p.name}: change one of your characters?`)) return;
-  const pi = S.players.indexOf(p);
-  const out = chooseCharacter(pi, "Replace which character?", true); if(!out) return;
-  const pick = promptChoice(free.map(r=>({ r, label:`${r.name} (${r.hp} HP)` })), `Replace ${out.name} with?`); if(!pick) return;
-  p.chars[p.chars.indexOf(out)] = { ...pick.r, curHp:pick.r.hp, alive:true };
-  log(`  → ${p.name} swapped ${out.name} for ${pick.r.name}.`);
+  const others = p.chars.map((c,i)=>({ i, label:c.name })).filter(o=>o.i!==p.activeIdx);
+  const pick = promptChoice(others, `${p.name}: switch your active character? (Cancel keeps ${activeChar(p).name})`);
+  if(pick){ p.activeIdx = pick.i; log(`  → ${p.name} switches to ${activeChar(p).name}.`); }
 }
 
 /* ========================= ACTIONS ========================= */
-function playerHp(p){ return p.chars.reduce((s,c)=>s+Math.max(0,c.curHp),0); }
-function playerMaxHp(p){ return p.chars.reduce((s,c)=>s+c.hp,0); }
-
 function hasSupport(p, name){ return (p.supports||[]).includes(name); }
 
-function applyDamage(targetPlayerIdx, charIdx, amount){
-  const c = S.players[targetPlayerIdx].chars[charIdx];
-  c.curHp -= amount;
-  if(c.curHp<=0){ c.curHp=0; if(c.alive){ c.alive=false; log(`💀 ${S.players[targetPlayerIdx].name}'s ${c.name} is down!`); } }
-  render(); renderTokens();
-}
-
-/* ---- Attack engine with terrain modifiers ---- */
-function locate(ch){
-  for(let pi=0;pi<S.players.length;pi++){ const ci=S.players[pi].chars.indexOf(ch); if(ci>=0) return {pi,ci}; }
-  return null;
-}
-function ownerOf(ch){ const l=locate(ch); return l ? S.players[l.pi] : null; }
-function terrainOf(ch){ const o=ownerOf(ch); return o ? realmOf(o.pos) : null; }   // realm of the space the owner's piece is on
-// Outgoing combat damage, applying attacker/defender terrain modifiers.
-let pendingBaseBonus = 0;   // +damage applied to the next non-AOE hit (The Titan's Gauntlet)
-function dealCombatDamage(defChar, base, attacker, isAoe){
+function realmDamage(defender, base, attacker, isAoe){
   if(!isAoe && pendingBaseBonus){ base += pendingBaseBonus; pendingBaseBonus = 0; } // Titan's Gauntlet
-  const dmg = combatDamage({ base, attackerId:attacker.id, attackerTerrain:terrainOf(attacker),
-    defenderId:defChar.id, defenderTerrain:terrainOf(defChar), isAoe });
-  const loc = locate(defChar); if(!loc) return;
-  applyDamage(loc.pi, loc.ci, dmg);
-  log(`  → ${defChar.name} takes ${dmg}${isAoe?" (AOE)":""}.`);
+  const dmg = combatDamage({ base, attackerId:activeChar(attacker).id, attackerTerrain:realmOf(attacker.pos),
+    defenderId:activeChar(defender).id, defenderTerrain:realmOf(defender.pos), isAoe });
+  loseHp(defender, dmg);
+  log(`  → ${defender.name} takes ${dmg}${isAoe?" (AOE)":""}.`);
+  if(isOut(defender)) log(`💀 ${defender.name} is out!`);
+  render(); renderTokens();
 }
-function dealSelfDamage(ch, amount){
-  if(selfDamageAfterTerrain(ch.id, terrainOf(ch), amount)===0 && amount>0){ log(`  → ${ch.name} ignores ${amount} self-damage (Unyielding Fury).`); return; }
-  const loc = locate(ch); if(!loc) return;
-  applyDamage(loc.pi, loc.ci, amount);
-  log(`  → ${ch.name} takes ${amount} self-damage.`);
+let pendingBaseBonus = 0;   // +damage applied to the next non-AOE hit
+function dealSelfDamage(p, amount){
+  const took = selfDamage(p, amount);
+  log(took ? `  → ${p.name} takes ${amount} self-damage.` : `  → ${p.name} ignores ${amount} self-damage (Unyielding Fury).`);
+  render(); renderTokens();
 }
-function healCharacter(ch, amount){
-  amount = healAfterTerrain(ch.id, terrainOf(ch), amount);
-  if(!ch.alive && ch.curHp<=0) return;
-  ch.curHp = Math.min(ch.hp, ch.curHp + amount);
-  log(`  → ${ch.name} heals ${amount} (now ${ch.curHp}/${ch.hp}).`);
+function healPlayer(p, amount){
+  const h = heal(p, amount);
+  log(`  → ${p.name} heals ${h} (now ${p.hp}/${p.maxHp}).`);
   render(); renderTokens();
 }
 
-// Attacks target a player; the defender then chooses which of their characters takes it.
 function pickOpponent(){
   const choices = opponents(S, S.current).map(pi=>{ const pl=S.players[pi];
-    return { pi, label:`${pl.name} — ${livingChars(pl).map(c=>`${c.name} (${c.curHp})`).join(", ")}` }; });
+    return { pi, label:`${pl.name} — ${pl.hp} HP, active ${activeChar(pl).name}` }; });
   const pick = promptChoice(choices, "Attack which player?");
   return pick ? pick.pi : null;
-}
-// A forced choice (defender, area hit) falls back to the first living character on cancel;
-// a cancellable one (your own pick) returns null. Null also when nobody is alive.
-function chooseCharacter(pi, title, cancellable=false){
-  const chars = livingChars(S.players[pi]);
-  if(!chars.length) return null;
-  const pick = promptChoice(chars.map(c=>({ char:c, label:`${c.name} (${c.curHp}/${c.hp})` })), title);
-  return pick ? pick.char : (cancellable ? null : chars[0]);
 }
 function promptChoice(choices, title="Choose target:"){
   if(choices.length===0){ alert("No valid targets."); return null; }
@@ -347,8 +298,8 @@ function promptChoice(choices, title="Choose target:"){
   return (!isNaN(idx) && choices[idx]) ? choices[idx] : null;
 }
 
-function useAttack(attacker, atk){
-  const p = S.players[S.current];
+function useAttack(atk){
+  const p = S.players[S.current], attacker = activeChar(p);
   const roll = atk.needsRoll ? (1+Math.floor(Math.random()*6)) : null;
   if(roll!=null){ const d=$("#dice"); if(d) d.textContent=roll; log(`🎲 ${p.name} rolled ${roll}.`); }
 
@@ -359,22 +310,12 @@ function useAttack(attacker, atk){
   const effCost = Math.max(0, cost - (p.attackDiscount||0) - supportCut - (p.costCut||0));
   if(p.energy < effCost){ alert(`Not enough energy (need ${effCost}).`); return; }
 
-  let target=null, veil=false;
+  let target=null;
   if(atk.target==="enemy"){
     const pi = pickOpponent(); if(pi==null) return;
-    veil = hasSupport(p, "Veilpiercer") && confirm("Use Veilpiercer? You pick the character, half damage.");
-    const char = veil ? chooseCharacter(pi, `Veilpiercer: which of ${S.players[pi].name}'s characters?`, true)
-                      : chooseCharacter(pi, `${S.players[pi].name}: which character takes the hit?`);
-    if(!char) return;
-    target = { pi, char };
-  } else if(atk.target==="ally"){
-    const char = chooseCharacter(S.current, "Which of your characters?", true); if(!char) return;
-    target = { pi:S.current, char };
+    target = S.players[pi];
   }
-  const hit = (n)=> veil ? veilpiercerDamage(n) : n;
-  // Area effects: every hit opponent chooses which of their characters takes it.
-  const eachOpponent = (fn, skipPi)=> opponents(S, S.current).filter(pi=>pi!==skipPi)
-    .forEach(pi=> fn(chooseCharacter(pi, `${S.players[pi].name}: which character takes ${atk.name}?`)));
+  const others = (skip)=> opponents(S, S.current).map(i=>S.players[i]).filter(o=>o!==skip);
 
   p.energy -= effCost;
   p.energySpentThisTurn = (p.energySpentThisTurn||0) + effCost;
@@ -388,19 +329,18 @@ function useAttack(attacker, atk){
   }
 
   const api = {
-    attacker, player:p, target, roll, energyUsed:effCost,
-    dmg:(n)=>{ if(target) dealCombatDamage(target.char, hit(n), attacker, false); },
-    aoe:(n)=> eachOpponent(c=> dealCombatDamage(c, n, attacker, true), target && target.pi),
-    aoeAll:(n)=> eachOpponent(c=> dealCombatDamage(c, n, attacker, true)),
-    selfDmg:(n)=> dealSelfDamage(attacker, n),
-    heal:(ch,n)=> healCharacter(ch, n),
-    healAllies:(n)=>{ p.chars.forEach(c=>{ if(c.alive) healCharacter(c, n); }); },
-    steal:(n)=>{ if(target){ dealCombatDamage(target.char, hit(n), attacker, false); healCharacter(attacker, hit(n)); } },
-    stealAll:(n)=>{ eachOpponent(c=> dealCombatDamage(c, n, attacker, true)); if(n>0) healCharacter(attacker, n); },
+    player:p, target, roll, energyUsed:effCost,
+    dmg:(n)=>{ if(target) realmDamage(target, n, p, false); },
+    aoe:(n)=> others(target).forEach(o=> realmDamage(o, n, p, true)),
+    aoeAll:(n)=> others().forEach(o=> realmDamage(o, n, p, true)),
+    selfDmg:(n)=> dealSelfDamage(p, n),
+    heal:(n)=> healPlayer(p, n),
+    steal:(n)=>{ if(target){ realmDamage(target, n, p, false); healPlayer(p, n); } },
+    stealAll:(n)=>{ others().forEach(o=> realmDamage(o, n, p, true)); if(n>0) healPlayer(p, n); },
     draw:(n)=> drawCard(p, n),
-    noMove:(ch)=>{ const o=ownerOf(ch); o.noMoveNext=true; log(`  → ${o.name} cannot move next turn.`); },
-    swapPos:(ch)=>{ const o=ownerOf(ch); [p.pos,p.trail,o.pos,o.trail]=[o.pos,o.trail,p.pos,p.trail]; log(`  → swapped pieces with ${o.name}.`); },
-    targetMoved: !!(target && S.players[target.pi].movedThisTurn),
+    noMove:(o)=>{ o.noMoveNext=true; log(`  → ${o.name} cannot move next turn.`); },
+    swap:()=>{ [p.pos,p.trail,target.pos,target.trail]=[target.pos,target.trail,p.pos,p.trail]; log(`  → swapped pieces with ${target.name}.`); },
+    targetMoved: !!(target && target.movedThisTurn),
     log:(m)=> log(m),
   };
 
@@ -414,14 +354,14 @@ function render(){
   saveState();
   const p = S.players[S.current];
   $("#turnLabel").textContent = `${p.name}`;
-  $("#phaseLabel").textContent = `• ${playerHp(p)} HP • ${p.energy} ⚡ • ${S.deck.length} in deck`;
+  $("#phaseLabel").textContent = `• ${p.hp} HP • ${p.energy} ⚡ • ${S.deck.length} in deck`;
 
   const panel = $("#sidePanel");
   panel.innerHTML = "";
 
   panel.appendChild(h(`<h2 style="color:${p.color}">${p.name}</h2>`));
-  const hpPct = Math.round(100*playerHp(p)/playerMaxHp(p));
-  panel.appendChild(h(`<div class="stat-row"><span class="pill">HP ${playerHp(p)}/${playerMaxHp(p)}</span>
+  const hpPct = Math.round(100*p.hp/p.maxHp);
+  panel.appendChild(h(`<div class="stat-row"><span class="pill">HP ${p.hp}/${p.maxHp}</span>
     <div class="hpbar"><div style="width:${hpPct}%"></div></div></div>`));
 
   const eRow = h(`<div class="stat-row"><span class="pill energy">⚡ Energy: ${p.energy}</span></div>`);
@@ -432,16 +372,16 @@ function render(){
   panel.appendChild(eRow);
 
   const chRow = h(`<div class="chars"></div>`);
-  p.chars.forEach(c=>{
+  p.chars.forEach((c,ci)=>{
     const m = document.createElement("div");
-    m.className = "mini"+(c.alive?"":" dead");
-    m.innerHTML = `<img src="${ASSET.cards+c.img}"/><div>${c.name}</div><div>${c.curHp}/${c.hp}</div>`;
+    m.className = "mini"+(ci===p.activeIdx?" active":"");
+    m.innerHTML = `<img src="${ASSET.cards+c.img}"/><div>${c.name}${ci===p.activeIdx?" ★":""}</div><div>${typeOf(c.id)}</div>`;
     chRow.appendChild(m);
   });
   panel.appendChild(h(`<div class="section"><b>Characters</b></div>`));
   panel.appendChild(chRow);
 
-  // The space the piece is on sets the realm (terrain bonuses) for all this player's characters.
+  // The space the piece is on sets the realm; its effects follow the active character's type.
   panel.appendChild(h(`<div class="section"><b>Your piece</b></div>`));
   panel.appendChild(h(`<div style="font-size:12px">${spaceLabel(p.pos)}</div>`));
   const b = p.dmgBuffs, buffs = [
@@ -450,21 +390,18 @@ function render(){
   ].filter(Boolean);
   if(buffs.length) panel.appendChild(h(`<div style="font-size:11px;color:var(--good)">${buffs.join(" · ")}</div>`));
 
-  // Any living character may attack; pick the character and the attack together.
-  panel.appendChild(h(`<div class="section"><b>Attacks</b></div>`));
-  livingChars(p).forEach(ch=>{
-    panel.appendChild(h(`<div style="font-size:12px;color:var(--accent2);margin-top:4px">${ch.name}</div>`));
-    const atkWrap = h(`<div class="attacks"></div>`);
-    ch.attacks.forEach(a=>{
-      const costLabel = a.costOf ? "*" : a.cost;   // * = cost depends on roll/energy
-      const row = h(`<div class="atk"><span>${a.name} <span style="color:var(--muted)">— ${a.note}</span></span><span class="cost">${costLabel}⚡</span></div>`);
-      const use = btn("Use", ()=> useAttack(ch, a));
-      use.disabled = !a.costOf && p.energy < a.cost;   // dynamic-cost attacks check at resolve time
-      row.appendChild(use);
-      atkWrap.appendChild(row);
-    });
-    panel.appendChild(atkWrap);
+  // Only the active character attacks.
+  panel.appendChild(h(`<div class="section"><b>Attacks — ${activeChar(p).name}</b></div>`));
+  const atkWrap = h(`<div class="attacks"></div>`);
+  activeChar(p).attacks.forEach(a=>{
+    const costLabel = a.costOf ? "*" : a.cost;   // * = cost depends on roll/energy
+    const row = h(`<div class="atk"><span>${a.name} <span style="color:var(--muted)">— ${a.note}</span></span><span class="cost">${costLabel}⚡</span></div>`);
+    const use = btn("Use", ()=> useAttack(a));
+    use.disabled = !a.costOf && p.energy < a.cost;   // dynamic-cost attacks check at resolve time
+    row.appendChild(use);
+    atkWrap.appendChild(row);
   });
+  panel.appendChild(atkWrap);
 
   const dice = h(`<div class="section"><b>Dice & Movement</b></div>`);
   panel.appendChild(dice);
@@ -520,23 +457,18 @@ function render(){
   panel.appendChild(logEl);
 }
 
-function buildDamageHelper(){
+function buildDamageHelper(){   // Debug only; acts on team HP and cannot bring a player back.
   const wrap = h(`<div></div>`);
   const psel = document.createElement("select");
-  S.players.forEach((pl,i)=>{ const o=document.createElement("option"); o.value=i; o.textContent=pl.name; psel.appendChild(o); });
-  const csel = document.createElement("select");
-  function fillChars(){ csel.innerHTML=""; S.players[psel.value].chars.forEach((c,ci)=>{ const o=document.createElement("option"); o.value=ci; o.textContent=`${c.name} (${c.curHp}/${c.hp})`; csel.appendChild(o); }); }
-  psel.onchange=fillChars; fillChars();
+  S.players.forEach((pl,i)=>{ const o=document.createElement("option"); o.value=i; o.textContent=`${pl.name} (${pl.hp}/${pl.maxHp})`; psel.appendChild(o); });
   const amt = h(`<input type="number" value="2" min="0" />`);
   const row = h(`<div class="controls" style="align-items:center"></div>`);
-  [psel,csel,amt].forEach(e=>{ e.style.background="var(--panel2)"; e.style.color="var(--text)"; e.style.border="1px solid var(--line)"; e.style.borderRadius="4px"; e.style.padding="3px"; row.appendChild(e); });
-  row.appendChild(btn("Damage", ()=> applyDamage(+psel.value,+csel.value,+amt.value||0)));
-  row.appendChild(btn("Heal", ()=>{ const c=S.players[psel.value].chars[csel.value]; c.curHp=Math.min(c.hp,c.curHp+(+amt.value||0)); if(c.curHp>0&&!c.alive)c.alive=true; render(); renderTokens(); }));
+  [psel,amt].forEach(e=>{ e.style.background="var(--panel2)"; e.style.color="var(--text)"; e.style.border="1px solid var(--line)"; e.style.borderRadius="4px"; e.style.padding="3px"; row.appendChild(e); });
+  row.appendChild(btn("Damage", ()=>{ loseHp(S.players[psel.value], +amt.value||0); render(); renderTokens(); }));
+  row.appendChild(btn("Heal", ()=>{ const t=S.players[psel.value]; if(!isOut(t)){ t.hp=Math.min(t.maxHp,t.hp+(+amt.value||0)); } render(); renderTokens(); }));
   wrap.appendChild(row);
   return wrap;
 }
-
-function openAttackTargeting(attacker, atk){ useAttack(attacker, atk); }
 
 /* --- Card modal + effect engine --- */
 let openCardIdx = null;
@@ -544,15 +476,14 @@ function cardApi(p){
   return {
     p,
     energy(n){ p.energy = Math.max(0, p.energy + n); },
-    healChosen(n){ const c=chooseCharacter(S.current, "Heal which character?"); if(c) healCharacter(c, n); },
-    selfDmgChosen(n){ const c=chooseCharacter(S.current, "Which character takes the self-damage?"); const l=c&&locate(c); if(l) applyDamage(l.pi,l.ci,n); },
+    heal(n){ healPlayer(p, n); },
+    selfDmg(n){ dealSelfDamage(p, n); },
     draw(n){ drawCard(p, n); },
     hand(){ return p.hand.length; },
-    distinctTypes(){ return new Set(p.chars.filter(c=>c.alive).map(c=>c.id)).size; },
+    distinctTypes(){ return distinctTypes(p); },
     energySpent(){ return p.energySpentThisTurn || 0; },
     discount(n){ p.attackDiscount = (p.attackDiscount||0) + n; },
-    aoeEnemies(n){ opponents(S, S.current).forEach(pi=>{ const l=locate(chooseCharacter(pi, `${S.players[pi].name}: which character takes the hit?`)); if(l) applyDamage(l.pi,l.ci,n); }); },
-    hasMage(){ return hasLivingClass(p, "Mages"); },
+    aoeEnemies(n){ opponents(S, S.current).forEach(pi=>{ loseHp(S.players[pi], n); log(`  → ${S.players[pi].name} takes ${n}.`); }); },
     log(m){ log(m); },
   };
 }
@@ -600,7 +531,7 @@ function renderTokens(){
   board.querySelectorAll(".token").forEach(t=>t.remove());
   const seen = {};
   S.players.forEach((p, pi)=>{
-    if(!p.chars.some(c=>c.alive)) return;   // eliminated players leave the board
+    if(isOut(p)) return;   // eliminated players leave the board
     const s = SPACES[p.pos], k = seen[p.pos] = (seen[p.pos]||0) + 1;
     const [dx,dy] = SHARE_OFFSETS[(k-1) % SHARE_OFFSETS.length];
     const t = document.createElement("div");
