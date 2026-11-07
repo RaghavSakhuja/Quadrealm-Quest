@@ -437,10 +437,11 @@ function attackCost(p, atkIndex, roll, free){
   return Math.max(0, c - p.attackDiscount - spaceCostCut(p.pos));
 }
 function moltenDamage(healing){ return Math.floor(healing*3/2); }
-function pickOpponent(S, ui, title){
+function pickOpponent(S, ui, title, forced=false){
   const opts = opponents(S, S.current);
   if(opts.length<=1) return opts.length ? opts[0] : null;
-  return ui.choosePlayer(opts, title);
+  const pi = ui.choosePlayer(opts, title);
+  return pi==null && forced ? opts[0] : pi;   // already paid for: cancelling can't drop the hit
 }
 function noteDamage(S, p, n){   // Adrenaline Rush adds up damage until the owner's next turn
   const e = p.effects.find(x=>x.card==="Adrenaline Rush");
@@ -484,7 +485,7 @@ function resolveAttack(S, atkIndex, target, roll, energyUsed, ui, char){
   });
   if(moltenPool>0){   // Molten Power: the attack's healing becomes one hit, with no modifiers
     let to = target;
-    if(!to || isOut(to)){ const pi = pickOpponent(S, ui, "Molten Power: which opponent?"); to = pi==null ? null : S.players[pi]; }
+    if(!to || isOut(to)){ const pi = pickOpponent(S, ui, "Molten Power: which opponent?", true); to = pi==null ? null : S.players[pi]; }
     if(to) takeDamage(S, to, moltenDamage(moltenPool));
   }
   return hits;
@@ -519,12 +520,15 @@ function attackFlow(S, atkIndex, ui){
   p.energy -= cost; p.energySpentThisTurn += cost; if(!free) p.attackDiscount = 0;
   p.attackedThisTurn = true; if(index===0) p.usedBasicThisTurn = true;
   const hits = [];
-  strikers.forEach((c,i)=>{ hits.push(...resolveAttack(S, index, target, i===0 ? firstRoll : rollFor(c.attacks[index]), cost, ui, c)); });
+  strikers.forEach((c,i)=>{
+    if(i>0 && (isOut(p) || !opponents(S, S.current).length)) return;   // the first strike already decided it
+    hits.push(...resolveAttack(S, index, target, i===0 ? firstRoll : rollFor(c.attacks[index]), cost, ui, c));
+  });
   p.nextAttackBonus = 0;
   hits.forEach(d=>{ d.effects = d.effects.filter(e=>e.card!=="Unyielding Strength"); });   // it blocks one attack
   if(relentlessApplies(S, p)){   // Relentless Assault: mandatory, free, may pick a new target, no retrigger
     say(S, "Relentless Assault: a free skill attack.");
-    const pi = activeChar(p).attacks[1].target==="enemy" ? pickOpponent(S, ui, "Relentless Assault: attack which player?") : null;
+    const pi = activeChar(p).attacks[1].target==="enemy" ? pickOpponent(S, ui, "Relentless Assault: attack which player?", true) : null;
     resolveAttack(S, 1, pi==null ? null : S.players[pi], null, 0, ui);
   }
   const killed = S.players.some((o,i)=>i!==S.current && isOut(o) && !o.out);
@@ -570,7 +574,7 @@ function eventApi(S, p, ui){
     },
     rangeHit(range, n){ withinRange(S, pi, range).forEach(i=>takeDamage(S, S.players[i], n)); },   // card damage is not an attack
     steadyAim(){
-      if(S.phase!=="Move"){ say(S, "  → you've already moved: no effect."); return; }
+      if(p.movedThisTurn){ say(S, "  → you've already moved: no effect."); return; }
       skipMove(S); p.nextAttackBonus += 2; say(S, `  → ${p.name} skips moving; next attack +2.`);
     },
     log(m){ say(S, m); },

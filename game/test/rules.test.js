@@ -480,8 +480,33 @@ test("Steady Aim skips the move and adds +2", () => {
   card(S, "Steady Aim"); assert.equal(S.phase, "Main"); assert.equal(p.nextAttackBonus, 2);
 });
 test("Steady Aim does nothing once you've moved", () => {
-  const S = mkGame([["archer","knight","cleric"],["samurai","gambler","berserker"]]); S.phase = "Main"; const p = S.players[0];
+  const S = mkGame([["archer","knight","cleric"],["samurai","gambler","berserker"]]); S.phase = "Main"; const p = S.players[0]; p.movedThisTurn = true;
   card(S, "Steady Aim"); assert.equal(p.nextAttackBonus, 0);
+});
+test("Steady Aim still pays when an effect stopped you moving", () => {
+  const S = mkGame([["archer","knight","cleric"],["samurai","gambler","berserker"]]); const p = S.players[0]; p.noMoveNext = true;
+  Rules.startTurn(S, stubUi({})); assert.equal(S.phase, "Main");
+  card(S, "Steady Aim"); assert.equal(p.nextAttackBonus, 2);
+});
+test("Echoing Strikes: the second strike doesn't run once the first has won the game", () => {
+  const S = mkGame([["berserker","titan","cleric"],["archer","gambler","knight"]]); S.phase = "Main"; const [p,d] = S.players;
+  p.supports = ["Echoing Strikes"]; p.pos = d.pos = "7,0"; p.hp = 1; d.hp = 2;
+  Rules.attackFlow(S, 0, stubUi({ confirms:[true] })); assert.equal(S.winner, 0); assert.equal(p.hp, 1);
+});
+test("Echoing Strikes: a dead attacker's second strike doesn't run", () => {
+  const S = mkGame([["titan","berserker","cleric"],["archer","gambler","knight"]]); S.phase = "Main"; const [p,d] = S.players;
+  p.supports = ["Echoing Strikes"]; p.pos = d.pos = "7,0"; p.hp = 1; p.energy = 3; d.hp = 5; d.energy = 1;
+  Rules.attackFlow(S, 0, stubUi({ confirms:[true] })); assert.equal(d.hp, 2); assert.equal(S.winner, 1);
+});
+test("cancelling the Relentless Assault target still hits an opponent", () => {
+  const S = game(["berserker","knight","cleric"],["archer","gambler","titan"],{ more:[["samurai","ballista","tactician"]] });
+  const [p,a,b] = S.players; p.pos = "10,1"; const [x,y] = [a.hp,b.hp];
+  Rules.attackFlow(S, 0, stubUi({ picks:[2,null] })); assert.deepEqual([x-a.hp, y-b.hp], [4,2]);
+});
+test("cancelling the Molten Power target still hits an opponent", () => {
+  const S = game(["cleric","knight","titan"],["archer","gambler","berserker"],{ more:[["samurai","ballista","tactician"]] });
+  const [p,a] = S.players; p.energy = 4; p.pos = "4,14"; const x = a.hp;
+  Rules.attackFlow(S, 2, stubUi({ picks:[null] })); assert.equal(x - a.hp, 9);
 });
 test("Recovery Surge heals 5 and stops the next move", () => {
   const S = brute(), p = S.players[0]; p.hp = 50; card(S, "Recovery Surge"); assert.equal(p.hp, 55); assert.equal(p.noMoveNext, true);
