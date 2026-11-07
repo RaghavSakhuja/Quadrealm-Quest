@@ -108,8 +108,8 @@ test("start is Embark, with no realm", () => {
 test("the loop is 32 spaces by middle lanes and 36 by outer lanes", () => {
   assert.equal(walk(1), 32); assert.equal(walk(0), 36); assert.equal(walk(2), 36);
 });
-test("lane split after the top corridor offers +1, middle, -1 into Mountain", () => {
-  assert.deepEqual(Rules.nextOptions("8,0").map(o => [o.to, o.energy]), [["10,0",1],["10,1",0],["9,1",-1]]);
+test("outer lane costs 1, inner gives 1", () => {
+  assert.deepEqual(Rules.nextOptions("8,0").map(o => [o.to, o.energy]), [["10,0",-1],["10,1",0],["9,1",1]]);
   assert.deepEqual(Rules.nextOptions("7,0").map(o => o.to), ["8,0"]);
   assert.deepEqual(Rules.nextOptions("15,5").map(o => o.to), ["15,6"]);
 });
@@ -133,14 +133,61 @@ test("space texts match the board", () => {
   assert.equal(t("12,13"), "Attack costs 1 less energy"); assert.equal(t("15,5"), "Next Event Card Effect Doubled");
   assert.equal(t("4,3"), "Move back 1 space"); assert.equal(t("10,1"), null); assert.equal(t("7,0"), null);
 });
-test("every space text has an effect", () => {
-  for (const s of Object.values(Rules.SPACES)) if (s.text && s.text !== "Embark") assert.ok(Rules.SPACE_EFFECTS[s.text], s.text);
+const PASSIVE = ["Embark","Attack deals +1 damage","Basic Attack +1 Damage","Skill +1 Damage","Ultimate +1 Damage","Attack costs 1 less energy","Next Event Card Effect Doubled"];
+test("every one-off space has an effect, and passive spaces have none", () => {
+  for (const s of Object.values(Rules.SPACES)) if (s.text) assert.equal(!!Rules.SPACE_EFFECTS[s.text], !PASSIVE.includes(s.text), s.text);
 });
-test("space effects call the api", () => {
-  const calls = []; const api = new Proxy({}, { get: (_, k) => (...a) => calls.push([k, ...a]) });
-  Rules.SPACE_EFFECTS["Lose 2 energy"](api); Rules.SPACE_EFFECTS["Discard 1 card, then draw 2"](api);
-  Rules.SPACE_EFFECTS["Basic Attack +1 Damage"](api);
-  assert.deepEqual(calls, [["energy",-2],["discardChosen"],["draw",2],["dmgBuff","basic",1]]);
+const two = () => mkGame([["knight","cleric","titan"],["archer","gambler","berserker"]]);
+test("outer lane is not offered at 0 energy; cancel takes the middle lane", () => {
+  const S = two(), p = S.players[0];
+  p.pos = "8,0"; p.energy = 0;
+  assert.deepEqual(Rules.laneChoices(p, Rules.nextOptions("8,0")).map(o => o.energy), [0,1]);
+  Rules.moveForward(S, p, 1, stubUi({ picks:[null] })); assert.equal(p.pos, "10,1"); assert.equal(p.movedThisTurn, true);
+});
+test("taking a lane applies its energy", () => {
+  const S = two(), p = S.players[0]; p.pos = "8,0"; p.energy = 1;
+  Rules.moveForward(S, p, 1, stubUi({ picks:[Rules.nextOptions("8,0")[0]] })); assert.equal(p.pos, "10,0"); assert.equal(p.energy, 0);
+  p.pos = "8,0"; Rules.moveForward(S, p, 1, stubUi({ picks:[Rules.nextOptions("8,0")[2]] })); assert.equal(p.pos, "9,1"); assert.equal(p.energy, 1);
+});
+test("space bonuses are passive and follow the piece", () => {
+  assert.equal(Rules.spaceDamageBonus("11,13", "basic"), 1); assert.equal(Rules.spaceDamageBonus("11,13", "skill"), 0);
+  assert.equal(Rules.spaceDamageBonus("1,4", "ultimate"), 1); assert.equal(Rules.spaceCostCut("12,13"), 1);
+  assert.equal(Rules.spaceDamageBonus("7,0", "basic"), 0); assert.equal(Rules.spaceCostCut("7,0"), 0);
+});
+test("the double-event space is used up once per stay", () => {
+  const p = two().players[0]; p.pos = "15,5"; assert.equal(Rules.onDoubleSpace(p), true);
+  p.doubleUsedAt = p.pos; assert.equal(Rules.onDoubleSpace(p), false);
+  p.pos = "7,0"; assert.equal(Rules.onDoubleSpace(p), false);
+});
+test("leaving the double-event space makes it usable again", () => {
+  const S = two(), p = S.players[0]; p.pos = "15,5"; p.doubleUsedAt = "15,5";
+  Rules.moveForward(S, p, 1, stubUi({})); assert.equal(p.doubleUsedAt, null);
+});
+test("move back triggers the space it lands on", () => {
+  const S = two(), p = S.players[0];
+  p.pos = "4,3"; p.trail = ["3,4"]; p.energy = 3;
+  Rules.landOn(S, p, stubUi({})); assert.equal(p.pos, "3,4"); assert.equal(p.energy, 1);
+});
+test("a card move does not trigger the landing space", () => {
+  const S = two(), p = S.players[0];
+  const hp = p.hp; p.pos = "13,5"; p.energy = 3;
+  Rules.moveByCard(S, p, 1, stubUi({})); assert.equal(p.pos, "14,6"); assert.equal(p.hp, hp); assert.equal(p.energy, 3);
+});
+test("landing on Lose 3 Health takes 3 HP", () => {
+  const S = two(), p = S.players[0]; p.pos = "14,6"; const hp = p.hp;
+  Rules.landOn(S, p, stubUi({})); assert.equal(p.hp, hp - 3);
+});
+test("Change your character switches for free", () => {
+  const S = two(), p = S.players[0];
+  p.pos = "13,5"; Rules.landOn(S, p, stubUi({ picks:[2] })); assert.equal(p.activeIdx, 2); assert.equal(p.actionUsed, false);
+});
+test("declining Change your character keeps the active character", () => {
+  const S = two(), p = S.players[0]; p.pos = "13,5"; Rules.landOn(S, p, stubUi({})); assert.equal(p.activeIdx, 0);
+});
+test("Discard one card lets you choose, and skips an empty hand", () => {
+  const S = two(), p = S.players[0]; p.pos = "9,1"; p.hand = ["a","b"];
+  Rules.landOn(S, p, stubUi({ picks:[1] })); assert.deepEqual(p.hand, ["a"]); assert.deepEqual(S.discard, ["b"]);
+  p.hand = []; const ui = stubUi({}); Rules.landOn(S, p, ui); assert.equal(ui.asked.length, 0);
 });
 test("space centres sit on the 3216px board grid", () => {
   assert.deepEqual([Rules.spaceXY(0,0).x, Math.round(Rules.spaceXY(15,15).y)], [250, 2968]);

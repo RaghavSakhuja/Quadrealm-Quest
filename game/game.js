@@ -6,7 +6,7 @@ const SAVE_KEY = "quadrealm_save_v4";
 
 const { ROSTER, CARDS, CARD_POOL, cardByName, buildDeck, shuffle, drawCards, say, typeOf, activeChar, activeType, distinctTypes,
   isOut, loseHp, selfDamage, heal, combatDamage, startRegen, SAVE_VERSION, isCompatibleSave, createPlayer, opponents,
-  SPACES, nextOptions, prevSpace, realmOf, SPACE_EFFECTS } = Rules;
+  SPACES, realmOf, spaceLabel, moveForward, landOn, spaceDamageBonus, spaceCostCut, onDoubleSpace } = Rules;
 
 const PLAYER_COLORS = ["#e6b450","#58c6ff","#68d391","#ff6b6b"];
 
@@ -197,68 +197,24 @@ function rollDice(){
   const r = 1+Math.floor(Math.random()*6);
   p.rolledThisTurn = true;
   log(`🎲 ${p.name} rolled ${r}.`);
-  moveForward(p, r);
-  landOn(p);
+  moveForward(S, p, r, ui);
+  landOn(S, p, ui);
   render(); renderTokens();
   const d = $("#dice"); if(d) d.textContent = r;
   return r;
 }
 
-/* ---- Movement along the board loop ---- */
-const LANE_LABEL = { 1:"+1 lane (outer) — gain 1 energy", 0:"Middle lane — free", "-1":"−1 lane (inner) — pay 1 energy" };
-function chooseLane(p, opts){
-  const choices = opts.filter(o=> o.energy>=0 || p.energy>=-o.energy)
-    .map(o=>({ ...o, label:LANE_LABEL[o.energy] }));
-  const realm = realmOf(opts[0].to);
-  return promptChoice(choices, `${p.name}: which lane into ${realm}?`) || choices.find(o=>o.energy===0);   // cancel → middle
-}
-function moveForward(p, n){
-  for(let k=0;k<n;k++){
-    const opts = nextOptions(p.pos);
-    const o = opts.length>1 ? chooseLane(p, opts) : opts[0];
-    if(o.energy){ p.energy = Math.max(0, p.energy + o.energy); log(`  → ${o.energy>0?"+1":"−1"} lane: ${p.name} ${o.energy>0?"gains":"pays"} 1 energy.`); }
-    p.trail.push(p.pos); if(p.trail.length>20) p.trail.shift();
-    p.pos = o.to;
-  }
-  if(n>0) p.movedThisTurn = true;
-}
-function moveBack(p, n){
-  for(let k=0;k<n;k++) p.pos = p.trail.pop() || prevSpace(p.pos);   // back the way it came
-  if(n>0) p.movedThisTurn = true;
-}
-function spaceLabel(id){ const s=SPACES[id]; return `${s.realm||"Corridor"}${s.text?` — ${s.text}`:""}`; }
-
-// Apply the effect of the space the piece ended on.
-function landOn(p){
-  const s = SPACES[p.pos];
-  log(`  → ${p.name} lands on ${spaceLabel(p.pos)}.`);
-  const fx = s.text && SPACE_EFFECTS[s.text];
-  if(fx) fx(spaceApi(p));
-}
-function spaceApi(p){
-  return {
-    draw(n){ drawCard(p, n); },
-    energy(n){ p.energy = Math.max(0, p.energy + n); },
-    discardChosen(){
-      if(!p.hand.length){ log("  → no card to discard."); return; }
-      const pick = promptChoice(p.hand.map((c,i)=>({ i, label:c })), "Discard which card?") || { i:0 };
-      const [c] = p.hand.splice(pick.i, 1); S.discard.push(c); log(`  → discarded ${c}.`);
-    },
-    heal(n){ const h=heal(p, n); log(`  → ${p.name} heals ${h}.`); render(); },
-    loseHp(n){ loseHp(p, n); log(`  → ${p.name} loses ${n} HP.`); render(); renderTokens(); },
-    moveBack(n){ moveBack(p, n); log(`  → moved back to ${spaceLabel(p.pos)}.`); },   // that space does not trigger
-    changeCharacter(){ changeCharacter(p); },
-    dmgBuff(kind, n){ p.dmgBuffs[kind] += n; log(`  → next ${kind==="any"?"attack":kind+" attack"} deals +${n} damage.`); },
-    costBuff(n){ p.costCut += n; log(`  → next attack costs ${n} less energy.`); },
-    doubleNextEvent(){ p.doubleEvent = true; log("  → next event card's effect is doubled."); },
-  };
-}
-// Free switch of the active character; does not use the action.
-function changeCharacter(p){
-  const others = p.chars.map((c,i)=>({ i, label:c.name })).filter(o=>o.i!==p.activeIdx);
-  const pick = promptChoice(others, `${p.name}: switch your active character? (Cancel keeps ${activeChar(p).name})`);
-  if(pick){ p.activeIdx = pick.i; log(`  → ${p.name} switches to ${activeChar(p).name}.`); }
-}
+/* ---- Player decisions, handed to the rules ---- */
+const LANE_LABEL = { "-1":"Outer lane (+1) — costs 1 energy", 0:"Middle lane — free", 1:"Inner lane (−1) — gives 1 energy" };
+const ui = {
+  chooseLane(choices, title){ return promptChoice(choices.map(o=>({ ...o, label:LANE_LABEL[o.energy] })), title); },
+  chooseCard(hand, title){ const pick = promptChoice(hand.map((c,i)=>({ i, label:c })), title); return pick ? pick.i : null; },
+  chooseChar(p, title){ const pick = promptChoice(p.chars.map((c,i)=>({ i, label:c.name })).filter(o=>o.i!==p.activeIdx), title); return pick ? pick.i : null; },
+  choosePlayer(pis, title){ const pick = promptChoice(pis.map(pi=>{ const pl=S.players[pi];
+    return { pi, label:`${pl.name} — ${pl.hp} HP, active ${activeChar(pl).name}` }; }), title); return pick ? pick.pi : null; },
+  roll(){ const r = 1+Math.floor(Math.random()*6); const d=$("#dice"); if(d) d.textContent=r; return r; },
+  confirm(title){ return confirm(title); },
+};
 
 /* ========================= ACTIONS ========================= */
 function hasSupport(p, name){ return (p.supports||[]).includes(name); }
@@ -307,7 +263,7 @@ function useAttack(atk){
   const cost = atk.costOf ? atk.costOf(p, roll) : atk.cost;
   let supportCut = 0;
   if(atkIndex===1 && hasSupport(p, "Arcane Efficiency")) supportCut += 1;   // skill cost -1
-  const effCost = Math.max(0, cost - (p.attackDiscount||0) - supportCut - (p.costCut||0));
+  const effCost = Math.max(0, cost - (p.attackDiscount||0) - supportCut - spaceCostCut(p.pos));
   if(p.energy < effCost){ alert(`Not enough energy (need ${effCost}).`); return; }
 
   let target=null;
@@ -320,13 +276,8 @@ function useAttack(atk){
   p.energy -= effCost;
   p.energySpentThisTurn = (p.energySpentThisTurn||0) + effCost;
   if(p.attackDiscount){ p.attackDiscount = 0; }   // discount consumed by this attack
-  p.costCut = 0;                                   // board-space discount too
   pendingBaseBonus = (atkIndex===0 && hasSupport(p, "The Titan's Gauntlet")) ? 1 : 0;   // base +1 dmg
-  if(atk.target==="enemy"){   // board-space damage bonuses ride on the main hit
-    const kind = ["basic","skill","ultimate"][atkIndex];
-    pendingBaseBonus += p.dmgBuffs.any + p.dmgBuffs[kind];
-    p.dmgBuffs.any = 0; p.dmgBuffs[kind] = 0;
-  }
+  if(atk.target==="enemy") pendingBaseBonus += spaceDamageBonus(p.pos, ["basic","skill","ultimate"][atkIndex]);
 
   const api = {
     player:p, target, roll, energyUsed:effCost,
@@ -384,11 +335,6 @@ function render(){
   // The space the piece is on sets the realm; its effects follow the active character's type.
   panel.appendChild(h(`<div class="section"><b>Your piece</b></div>`));
   panel.appendChild(h(`<div style="font-size:12px">${spaceLabel(p.pos)}</div>`));
-  const b = p.dmgBuffs, buffs = [
-    b.any && `next attack +${b.any} dmg`, b.basic && `basic +${b.basic}`, b.skill && `skill +${b.skill}`,
-    b.ultimate && `ultimate +${b.ultimate}`, p.costCut && `next attack −${p.costCut}⚡`, p.doubleEvent && "next event doubled",
-  ].filter(Boolean);
-  if(buffs.length) panel.appendChild(h(`<div style="font-size:11px;color:var(--good)">${buffs.join(" · ")}</div>`));
 
   // Only the active character attacks.
   panel.appendChild(h(`<div class="section"><b>Attacks — ${activeChar(p).name}</b></div>`));
@@ -513,7 +459,7 @@ $("#cardPlay").onclick = ()=>{
     p.hand.splice(openCardIdx, 1);
     S.discard.push(name);
     log(`${p.name} played ${name}.`);
-    const twice = p.doubleEvent; p.doubleEvent = false;   // "Next Event Card Effect Doubled" space
+    const twice = onDoubleSpace(p); if(twice) p.doubleUsedAt = p.pos;   // "Next Event Card Effect Doubled" space
     if(def && def.apply){ def.apply(cardApi(p)); if(twice){ log("  → doubled:"); def.apply(cardApi(p)); } }
     else if(twice) log("  → doubled: apply this card's effect twice.");
   }

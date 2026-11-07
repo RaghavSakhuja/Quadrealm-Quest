@@ -195,7 +195,7 @@ function heal(p, n){
 }
 
 /* ---- Board: one clockwise loop, traced from the 3216px board image (16×16 grid) ----
-   Corridor k leads into REALMS[k]; each realm splits into lanes [+1 outer, middle, −1 inner]. */
+   Corridor k leads into REALMS[k]; each realm splits into lanes [outer, middle, inner]. */
 function spaceXY(c, r){ return { x:250 + 181.2*c, y:244 + 181.6*r }; }
 const line = (c, r, dc, dr, n)=> Array.from({length:n}, (_,i)=> `${c+dc*i},${r+dr*i}`);
 const CORRIDORS = [ ["6,0","7,0","8,0"], ["15,6","15,7","15,8"], ["9,15","8,15","7,15"], ["0,9","0,8","0,7"] ];
@@ -205,7 +205,7 @@ const REALMS = [
   { realm:"Volcano",    lanes:[ line(5,15,-1,-1,6),  line(5,14,-1,-1,5),  line(6,14,-1,-1,6) ] },
   { realm:"Hot Spring", lanes:[ line(0,5,1,-1,6),    line(1,5,1,-1,5),    line(1,6,1,-1,6) ] },
 ];
-const LANE_ENERGY = [1, 0, -1];
+const LANE_ENERGY = [-1, 0, 1];   // outer lane (marked +1) costs 1, inner lane (marked −1) gives 1
 const START_SPACE = "6,0";
 const SPACE_TEXT = {
   "6,0":"Embark",
@@ -228,10 +228,10 @@ const SPACE_TEXT = {
 };
 // SPACES[id] = { id, x, y, realm, text, next:[{to, energy}], prev:[id] }  (prev of a realm exit: lanes' last spaces)
 const SPACES = {};
-function addSpace(id, realm){ const [c,r]=id.split(",").map(Number);
-  SPACES[id] = { id, ...spaceXY(c,r), realm, text:SPACE_TEXT[id]||null, next:[], prev:[] }; }
+function addSpace(id, realm, lane=null){ const [c,r]=id.split(",").map(Number);
+  SPACES[id] = { id, ...spaceXY(c,r), realm, lane, text:SPACE_TEXT[id]||null, next:[], prev:[] }; }
 const link = (a, b, energy=0)=>{ SPACES[a].next.push({ to:b, energy }); SPACES[b].prev.push(a); };
-CORRIDORS.forEach((cor,k)=>{ cor.forEach(id=>addSpace(id, null)); REALMS[k].lanes.forEach(l=>l.forEach(id=>addSpace(id, REALMS[k].realm))); });
+CORRIDORS.forEach((cor,k)=>{ cor.forEach(id=>addSpace(id, null)); REALMS[k].lanes.forEach((l,li)=>l.forEach(id=>addSpace(id, REALMS[k].realm, li))); });
 CORRIDORS.forEach((cor,k)=>{
   for(let i=1;i<cor.length;i++) link(cor[i-1], cor[i]);
   const exit = CORRIDORS[(k+1)%4][0];
@@ -245,7 +245,29 @@ function nextOptions(id){ return SPACES[id].next; }
 function prevSpace(id){ const p=SPACES[id].prev; return p.length>1 ? p[1] : p[0]; }   // middle lane when ambiguous
 function realmOf(id){ return (SPACES[id] && SPACES[id].realm) || null; }
 
-// Landing effects, keyed by space text. api is supplied by the game (see landOn in game.js).
+/* ---- Movement ---- */
+function laneChoices(p, opts){ return opts.filter(o=> o.energy>=0 || p.energy>=-o.energy); }
+function spaceLabel(id){ const s=SPACES[id]; return `${s.realm||"Corridor"}${s.text?` — ${s.text}`:""}`; }
+function stepTo(p, id){ p.trail.push(p.pos); if(p.trail.length>20) p.trail.shift(); p.pos = id; p.doubleUsedAt = null; }
+function moveForward(S, p, n, ui){
+  for(let k=0;k<n;k++){
+    const opts = nextOptions(p.pos); let o = opts[0];
+    if(opts.length>1){   // a realm entrance: the only place a piece picks a lane
+      o = ui.chooseLane(laneChoices(p, opts), `${p.name}: which lane into ${realmOf(opts[0].to)}?`) || opts.find(x=>x.energy===0);
+      if(o.energy){ p.energy = Math.max(0, p.energy + o.energy); say(S, `  → ${p.name} ${o.energy>0?"gains":"pays"} 1 energy for the lane.`); }
+    }
+    stepTo(p, o.to);
+  }
+  if(n>0) p.movedThisTurn = true;
+}
+// A card move walks the track like a roll, but the space it ends on does not activate.
+function moveByCard(S, p, n, ui){ moveForward(S, p, n, ui); }
+function moveBack(p, n){
+  for(let k=0;k<n;k++){ p.pos = p.trail.pop() || prevSpace(p.pos); p.doubleUsedAt = null; }   // back the way it came
+  if(n>0) p.movedThisTurn = true;
+}
+
+/* ---- Spaces: one-off effects activate on landing; passive bonuses come from where the piece is ---- */
 const SPACE_EFFECTS = {
   "Draw 1 more card": a=>a.draw(1),
   "Discard one card": a=>a.discardChosen(),
@@ -256,13 +278,35 @@ const SPACE_EFFECTS = {
   "Lose 3 Health": a=>a.loseHp(3),
   "Move back 1 space": a=>a.moveBack(1),
   "Change your character": a=>a.changeCharacter(),
-  "Attack deals +1 damage": a=>a.dmgBuff("any",1),
-  "Basic Attack +1 Damage": a=>a.dmgBuff("basic",1),
-  "Skill +1 Damage": a=>a.dmgBuff("skill",1),
-  "Ultimate +1 Damage": a=>a.dmgBuff("ultimate",1),
-  "Attack costs 1 less energy": a=>a.costBuff(1),
-  "Next Event Card Effect Doubled": a=>a.doubleNextEvent(),
 };
+function spaceDamageBonus(pos, kind){
+  const t = SPACES[pos] && SPACES[pos].text;
+  if(t==="Attack deals +1 damage") return 1;
+  return t===`${kind[0].toUpperCase()+kind.slice(1)}${kind==="basic"?" Attack":""} +1 Damage` ? 1 : 0;
+}
+function spaceCostCut(pos){ return SPACES[pos] && SPACES[pos].text==="Attack costs 1 less energy" ? 1 : 0; }
+function onDoubleSpace(p){ return SPACES[p.pos].text==="Next Event Card Effect Doubled" && p.doubleUsedAt!==p.pos; }
+function landOn(S, p, ui){
+  say(S, `  → ${p.name} lands on ${spaceLabel(p.pos)}.`);
+  const fx = SPACE_EFFECTS[SPACES[p.pos].text];
+  if(!fx) return;
+  fx({
+    draw(n){ drawCards(S, p, n); },
+    energy(n){ p.energy = Math.max(0, p.energy + n); },
+    heal(n){ const h=heal(p, n); say(S, `  → ${p.name} heals ${h}.`); },
+    loseHp(n){ loseHp(p, n); say(S, `  → ${p.name} loses ${n} HP.`); },
+    discardChosen(){
+      if(!p.hand.length){ say(S, "  → no card to discard."); return; }
+      const i = ui.chooseCard(p.hand, `${p.name}: discard which card?`) ?? 0;
+      const [c] = p.hand.splice(i, 1); S.discard.push(c); say(S, `  → discarded ${c}.`);
+    },
+    moveBack(n){ moveBack(p, n); say(S, `  → moved back to ${spaceLabel(p.pos)}.`); landOn(S, p, ui); },
+    changeCharacter(){
+      const i = ui.chooseChar(p, `${p.name}: switch your active character for free? (Cancel keeps ${activeChar(p).name})`);
+      if(i!=null){ p.activeIdx = i; say(S, `  → ${p.name} switches to ${activeChar(p).name}.`); }
+    },
+  });
+}
 
 /* ---- Players and saves ---- */
 const SAVE_VERSION = 4;
@@ -274,8 +318,7 @@ function createPlayer({ name, color, charIds, activeIdx=0 }){
   const maxHp = chars.reduce((s,c)=>s+c.hp, 0);
   return { name, color, chars, activeIdx, hp:maxHp, maxHp, energy:0, hand:[], supports:[], effects:[], pos:START_SPACE, trail:[],
     actionUsed:false, attackedThisTurn:false, usedBasicThisTurn:false, movedThisTurn:false, rolledThisTurn:false, cantMove:false, noMoveNext:false,
-    attackDiscount:0, nextAttackBonus:0, energySpentThisTurn:0,
-    dmgBuffs:{ any:0, basic:0, skill:0, ultimate:0 }, costCut:0, doubleEvent:false };
+    attackDiscount:0, nextAttackBonus:0, energySpentThisTurn:0, doubleUsedAt:null };
 }
 
 /* ---- Targeting ---- */
@@ -287,6 +330,7 @@ const Rules = { opponents, isOut, ROSTER, TERRAINS, CARDS, CARD_POOL, cardByName
   typeOf, activeChar, activeType, distinctTypes, loseHp, selfDamage, heal,
   combatDamage, startRegen,
   SAVE_VERSION, isCompatibleSave, createPlayer,
-  spaceXY, SPACES, START_SPACE, nextOptions, prevSpace, realmOf, SPACE_EFFECTS };
+  spaceXY, SPACES, START_SPACE, nextOptions, prevSpace, realmOf, spaceLabel, SPACE_EFFECTS,
+  laneChoices, moveForward, moveByCard, moveBack, landOn, spaceDamageBonus, spaceCostCut, onDoubleSpace };
 if (typeof module === "object" && module.exports) module.exports = Rules; else window.Rules = Rules;
 })();
