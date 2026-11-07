@@ -345,7 +345,7 @@ function createPlayer({ name, color, charIds, activeIdx=0 }){
   const chars = charIds.map(id=>({ ...ROSTER.find(r=>r.id===id) }));
   const maxHp = chars.reduce((s,c)=>s+c.hp, 0);
   return { name, color, chars, activeIdx, hp:maxHp, maxHp, energy:0, hand:[], supports:[], effects:[], pos:START_SPACE, trail:[],
-    actionUsed:false, attackedThisTurn:false, usedBasicThisTurn:false, movedThisTurn:false, rolledThisTurn:false, cantMove:false, noMoveNext:false,
+    actionUsed:false, attackedThisTurn:false, usedBasicThisTurn:false, movedThisTurn:false, noMoveNext:false, out:false,
     attackDiscount:0, nextAttackBonus:0, energySpentThisTurn:0, doubleUsedAt:null };
 }
 
@@ -355,6 +355,33 @@ function opponents(state, currentIdx){
 }
 function withinRange(state, pi, n){
   return opponents(state, pi).filter(o=>distance(state.players[pi].pos, state.players[o].pos)<=n);
+}
+
+/* ---- Elimination and winning ---- */
+function settle(S, { attackerPi, defenderPis }){
+  const newlyOut = S.players.map((p,i)=>i).filter(i=>isOut(S.players[i]) && !S.players[i].out);
+  newlyOut.forEach(i=>{ const p = S.players[i];
+    p.out = true; S.discard.push(...p.hand, ...p.supports); p.hand = []; p.supports = [];
+    say(S, `💀 ${p.name} is out!`); });
+  const alive = S.players.map((p,i)=>i).filter(i=>!isOut(S.players[i]));
+  if(S.winner==null){
+    if(alive.length===1) S.winner = alive[0];
+    else if(alive.length===0){   // died together: most energy, then the defender, first clockwise from the attacker
+      const top = Math.max(...newlyOut.map(i=>S.players[i].energy));
+      const tied = newlyOut.filter(i=>S.players[i].energy===top);
+      const clockwise = (i)=> (i - attackerPi + S.players.length) % S.players.length;
+      const pool = tied.filter(i=>defenderPis.includes(i));
+      S.winner = (pool.length ? pool : tied).sort((a,b)=>clockwise(a)-clockwise(b))[0];
+    }
+    if(S.winner!=null) say(S, `🏆 ${S.players[S.winner].name} wins!`);
+  }
+  return { winner: S.winner ?? null, currentOut: isOut(S.players[S.current]) };
+}
+// After anything resolves on a turn: every other player counts as the defender. A player who dies on their own turn passes it on.
+function settleTurn(S, ui){
+  const r = settle(S, { attackerPi:S.current, defenderPis:S.players.map((p,i)=>i).filter(i=>i!==S.current) });
+  if(r.currentOut && r.winner==null) endTurn(S, ui);
+  return r;
 }
 
 /* ---- Turn phases: Move, then Main (cards, then one action), then After ---- */
@@ -381,6 +408,7 @@ function roll(S, n, ui){
   moveForward(S, p, n, ui);
   S.phase = "Main";
   landOn(S, p, ui);
+  settleTurn(S, ui);
 }
 function skipMove(S){ if(S.phase==="Move") S.phase = "Main"; }
 function switchActive(S, idx){
@@ -475,10 +503,11 @@ function attackFlow(S, atkIndex, ui){
     const pi = activeChar(p).attacks[1].target==="enemy" ? pickOpponent(S, ui, "Relentless Assault: attack which player?") : null;
     resolveAttack(S, 1, pi==null ? null : S.players[pi], null, 0, ui);
   }
+  settleTurn(S, ui);
   return "done";
 }
 
-const Rules = { attackFlow, attackCost, moltenDamage, allowed, startTurn, roll, skipMove, switchActive, endTurn, opponents, isOut, ROSTER, TERRAINS, CARDS, CARD_POOL, cardByName, buildDeck, shuffle, drawCards, say,
+const Rules = { settle, settleTurn, attackFlow, attackCost, moltenDamage, allowed, startTurn, roll, skipMove, switchActive, endTurn, opponents, isOut, ROSTER, TERRAINS, CARDS, CARD_POOL, cardByName, buildDeck, shuffle, drawCards, say,
   typeOf, activeChar, activeType, distinctTypes, loseHp, selfDamage, heal,
   combatDamage, startRegen,
   SAVE_VERSION, isCompatibleSave, createPlayer,

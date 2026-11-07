@@ -157,17 +157,16 @@ function setZoom(delta){
 }
 
 /* ========================= TURN FLOW ========================= */
+function announceWinner(){
+  if(S.winner==null || S.announced) return;
+  S.announced = true;
+  alert(`${S.players[S.winner].name} wins the game!`);
+}
+function refresh(){ render(); renderTokens(); announceWinner(); }
 function endTurn(){
-  const alive = S.players.filter(p=>!isOut(p));
-  if(alive.length>1) Rules.endTurn(S, ui);
-  if(S.players.filter(p=>!isOut(p)).length<=1){
-    const w = S.players.find(p=>!isOut(p));
-    log(`🏆 ${w?w.name:"Nobody"} wins!`);
-    render(); renderTokens();
-    alert(`${w?w.name:"Nobody"} wins the game!`);
-    return;
-  }
-  render(); renderTokens();
+  if(!allowed(S).end) return;
+  Rules.endTurn(S, ui);
+  refresh();
 }
 
 const drawCard = (p, n)=> drawCards(S, p, n);
@@ -177,7 +176,7 @@ function rollDice(){
   if(!allowed(S).roll) return;
   const r = ui.roll();
   Rules.roll(S, r, ui);
-  render(); renderTokens();
+  refresh();
   const d = $("#dice"); if(d) d.textContent = r;
   return r;
 }
@@ -195,8 +194,6 @@ const ui = {
 };
 
 /* ========================= ACTIONS ========================= */
-function hasSupport(p, name){ return (p.supports||[]).includes(name); }
-
 function dealSelfDamage(p, amount){
   const took = selfDamage(p, amount);
   log(took ? `  → ${p.name} takes ${amount} self-damage.` : `  → ${p.name} ignores ${amount} self-damage (Unyielding Fury).`);
@@ -219,7 +216,7 @@ function promptChoice(choices, title="Choose target:"){
 function useAttack(atkIndex){
   const result = Rules.attackFlow(S, atkIndex, ui);
   if(result==="cancelled") return;
-  render(); renderTokens();
+  refresh();
 }
 
 /* ========================= RENDER ========================= */
@@ -344,7 +341,7 @@ function buildDamageHelper(){   // Debug only; acts on team HP and cannot bring 
   const amt = h(`<input type="number" value="2" min="0" />`);
   const row = h(`<div class="controls" style="align-items:center"></div>`);
   [psel,amt].forEach(e=>{ e.style.background="var(--panel2)"; e.style.color="var(--text)"; e.style.border="1px solid var(--line)"; e.style.borderRadius="4px"; e.style.padding="3px"; row.appendChild(e); });
-  row.appendChild(btn("Damage", ()=>{ loseHp(S.players[psel.value], +amt.value||0); render(); renderTokens(); }));
+  row.appendChild(btn("Damage", ()=>{ loseHp(S.players[psel.value], +amt.value||0); Rules.settleTurn(S, ui); refresh(); }));
   row.appendChild(btn("Heal", ()=>{ const t=S.players[psel.value]; if(!isOut(t)){ t.hp=Math.min(t.maxHp,t.hp+(+amt.value||0)); } render(); renderTokens(); }));
   wrap.appendChild(row);
   return wrap;
@@ -399,7 +396,8 @@ $("#cardPlay").onclick = ()=>{
     else if(twice) log("  → doubled: apply this card's effect twice.");
   }
   $("#cardModal").classList.add("hidden");
-  render();
+  Rules.settleTurn(S, ui);
+  refresh();
 };
 
 /* ========================= BOARD TOKENS ========================= */

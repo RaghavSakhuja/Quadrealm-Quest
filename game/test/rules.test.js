@@ -380,6 +380,49 @@ test("Sacrificial Rampage costs half your team HP, rounded down", () => {
   p.energy = 5; p.hp = 41; Rules.attackFlow(S, 2, stubUi({})); assert.equal(p.hp, 21);
 });
 
+/* ---- Elimination and winning ---- */
+const three = () => mkGame([["knight","cleric","titan"],["archer","gambler","berserker"],["samurai","ballista","tactician"]]);
+test("an eliminated player's cards are discarded and they can't be targeted", () => {
+  const S = three(), d = S.players[1];
+  d.hand = ["x"]; d.supports = ["y"]; d.hp = 0; Rules.settle(S, { attackerPi:0, defenderPis:[1] });
+  assert.deepEqual(d.hand, []); assert.deepEqual(d.supports, []); assert.ok(S.discard.includes("x") && S.discard.includes("y"));
+  assert.deepEqual(Rules.opponents(S, 0), [2]); assert.equal(S.winner ?? null, null);
+});
+test("last player standing wins", () => {
+  const S = two(); S.players[1].hp = 0;
+  assert.equal(Rules.settle(S, { attackerPi:0, defenderPis:[1] }).winner, 0); assert.equal(S.winner, 0);
+});
+test("dying together: most energy wins, then the defender", () => {
+  const S = two(); const [a,d] = S.players;
+  a.hp = 0; d.hp = 0; a.energy = 2; d.energy = 1;
+  assert.equal(Rules.settle(S, { attackerPi:0, defenderPis:[1] }).winner, 0);
+  const T = two(); T.players.forEach(p => { p.hp = 0; p.energy = 1; });
+  assert.equal(Rules.settle(T, { attackerPi:0, defenderPis:[1] }).winner, 1);
+});
+test("three dying together with two defenders tied: first clockwise from the attacker", () => {
+  const S = three(); S.current = 1; S.players.forEach(p => { p.hp = 0; p.energy = 1; });
+  assert.equal(Rules.settle(S, { attackerPi:1, defenderPis:[0,2] }).winner, 2);
+});
+test("Lose 3 Health can end your own turn with no more prompts", () => {
+  const S = three(), p = S.players[0];
+  p.hp = 3; p.pos = "10,13"; const ui = stubUi({}); Rules.landOn(S, p, ui);
+  assert.equal(Rules.settle(S, { attackerPi:0, defenderPis:[] }).currentOut, true); assert.equal(ui.asked.length, 0);
+});
+test("dying on a landing passes the turn to the next player", () => {
+  const S = three(), p = S.players[0]; S.phase = "Move"; p.pos = "13,5"; p.hp = 3;
+  Rules.roll(S, 1, stubUi({})); assert.equal(p.hp, 0); assert.equal(S.current, 1); assert.equal(S.phase, "Move");
+});
+test("dying to your own attack passes the turn; the game ends if one is left", () => {
+  const S = game(["titan","knight","cleric"],["archer","gambler","berserker"],{ more:[["samurai","ballista","tactician"]] }); const p = S.players[0];
+  p.hp = 1; Rules.attackFlow(S, 0, stubUi({ picks:[1] })); assert.equal(S.current, 1); assert.equal(S.winner ?? null, null);
+  const T = game(["knight","cleric","titan"],["archer","gambler","berserker"]); T.players[1].hp = 2; Rules.attackFlow(T, 0, stubUi({}));
+  assert.equal(T.winner, 0); assert.deepEqual(Rules.allowed(T), { roll:false, cards:false, switchChar:false, attack:false, end:false, events:false });
+});
+test("a mutual kill goes to whoever has more energy after paying", () => {
+  const S = game(["titan","knight","cleric"],["archer","gambler","berserker"]); const [p,d] = S.players;
+  p.hp = 1; d.hp = 3; p.energy = 0; d.energy = 1; Rules.attackFlow(S, 0, stubUi({})); assert.equal(S.winner, 1);
+});
+
 test("space centres sit on the 3216px board grid", () => {
   assert.deepEqual([Rules.spaceXY(0,0).x, Math.round(Rules.spaceXY(15,15).y)], [250, 2968]);
 });
