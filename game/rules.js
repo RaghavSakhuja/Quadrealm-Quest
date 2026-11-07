@@ -357,7 +357,48 @@ function withinRange(state, pi, n){
   return opponents(state, pi).filter(o=>distance(state.players[pi].pos, state.players[o].pos)<=n);
 }
 
-const Rules = { opponents, isOut, ROSTER, TERRAINS, CARDS, CARD_POOL, cardByName, buildDeck, shuffle, drawCards, say,
+/* ---- Turn phases: Move, then Main (cards, then one action), then After ---- */
+function allowed(S){
+  const main = S.phase==="Main", done = S.winner!=null;
+  if(done) return { roll:false, cards:false, switchChar:false, attack:false, end:false, events:false };
+  return { roll: S.phase==="Move" || (main && !!S.debug), cards:main, switchChar:main, attack:main, end:main || S.phase==="After", events:true };
+}
+function startTurn(S, ui){
+  const p = S.players[S.current];
+  Object.assign(p, { movedThisTurn:false, actionUsed:false, attackedThisTurn:false, usedBasicThisTurn:false, energySpentThisTurn:0, attackDiscount:0, nextAttackBonus:0 });
+  p.energy += 1;
+  drawCards(S, p, 1);
+  say(S, `${p.name}'s turn: +1 energy (now ${p.energy}), drew a card.`);
+  const regen = startRegen(p);
+  if(regen){ heal(p, regen); say(S, `${p.name} heals ${regen} (Forager's Resilience).`); }
+  p.startTurnHp = p.hp;
+  S.phase = "Move";
+  if(p.noMoveNext){ p.noMoveNext = false; S.phase = "Main"; say(S, `⛔ ${p.name} cannot move this turn.`); }
+}
+function roll(S, n, ui){
+  const p = S.players[S.current];
+  say(S, `🎲 ${p.name} rolled ${n}.`);
+  moveForward(S, p, n, ui);
+  S.phase = "Main";
+  landOn(S, p, ui);
+}
+function skipMove(S){ if(S.phase==="Move") S.phase = "Main"; }
+function switchActive(S, idx){
+  const p = S.players[S.current];
+  p.activeIdx = idx; p.actionUsed = true; S.phase = "After";
+  say(S, `${p.name} switches to ${activeChar(p).name}.`);
+}
+function endTurn(S, ui){
+  const p = S.players[S.current];
+  if(!isOut(p) && p.supports.includes("Priestess' Blessing")){ const h = heal(p, 1); say(S, `  → Priestess' Blessing heals ${h}.`); }
+  for(let k=1;k<=S.players.length;k++){
+    const i = (S.current+k) % S.players.length;
+    if(!isOut(S.players[i])){ S.current = i; break; }
+  }
+  startTurn(S, ui);
+}
+
+const Rules = { allowed, startTurn, roll, skipMove, switchActive, endTurn, opponents, isOut, ROSTER, TERRAINS, CARDS, CARD_POOL, cardByName, buildDeck, shuffle, drawCards, say,
   typeOf, activeChar, activeType, distinctTypes, loseHp, selfDamage, heal,
   combatDamage, startRegen,
   SAVE_VERSION, isCompatibleSave, createPlayer,

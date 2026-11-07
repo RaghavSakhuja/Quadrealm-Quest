@@ -5,8 +5,8 @@ const ASSET = {
 const SAVE_KEY = "quadrealm_save_v4";
 
 const { ROSTER, CARDS, CARD_POOL, cardByName, buildDeck, shuffle, drawCards, say, typeOf, activeChar, activeType, distinctTypes,
-  isOut, loseHp, selfDamage, heal, combatDamage, startRegen, SAVE_VERSION, isCompatibleSave, createPlayer, opponents,
-  SPACES, realmOf, spaceLabel, moveForward, landOn, spaceCostCut, onDoubleSpace } = Rules;
+  isOut, loseHp, selfDamage, heal, combatDamage, SAVE_VERSION, isCompatibleSave, createPlayer, opponents,
+  SPACES, realmOf, spaceLabel, allowed, spaceCostCut, onDoubleSpace } = Rules;
 
 const PLAYER_COLORS = ["#e6b450","#58c6ff","#68d391","#ff6b6b"];
 
@@ -15,7 +15,7 @@ let S = null;
 
 function newState(players) {
   const deck = shuffle(buildDeck());
-  return { version: SAVE_VERSION, players, deck, discard: [], current: 0, phase: "Main", log: [], drewThisTurn: false,
+  return { version: SAVE_VERSION, players, deck, discard: [], current: 0, phase: "Move", log: [],
     scale: null, debug: false };
 }
 
@@ -111,8 +111,8 @@ $("#resetSetup").onclick = ()=>{ setup={playerCount:0,seats:[],activeSeat:0}; $(
 $("#startBtn").onclick = ()=>{
   const players = setup.seats.map((s,pi)=>({ ...createPlayer({ name:s.name, color:PLAYER_COLORS[pi], charIds:s.picks, activeIdx:s.active||0 }) }));
   S = newState(players);
+  Rules.startTurn(S, ui);
   enterGame();
-  startTurn(true);
 };
 
 function enterGame(){
@@ -157,48 +157,26 @@ function setZoom(delta){
 }
 
 /* ========================= TURN FLOW ========================= */
-function startTurn(){
-  const p = S.players[S.current];
-  p.energy += 1;
-  S.phase = "Main";
-  S.drewThisTurn = false;
-  p.attackDiscount = 0; p.energySpentThisTurn = 0;   // reset per-turn card modifiers
-  p.movedThisTurn = false; p.rolledThisTurn = false; p.cantMove = false;
-  if(p.noMoveNext){ log(`⛔ ${p.name} cannot move this turn.`); p.noMoveNext=false; p.cantMove=true; }
-  const regen = startRegen(p);
-  if(regen){ heal(p, regen); log(`${p.name} regenerates ${regen} HP (Forager's Resilience).`); }
-  drawCard(p, 1);
-  log(`${p.name}'s turn — +1 energy (now ${p.energy}), drew a card.`);
-  render();
-}
-
 function endTurn(){
-  const ending = S.players[S.current];
-  if(hasSupport(ending, "Priestess' Blessing") && !isOut(ending)) heal(ending, 1);   // end-of-turn heal
-  let n = S.players.length, i = S.current;
-  for(let k=0;k<n;k++){ i=(i+1)%n; if(!isOut(S.players[i])){ S.current=i; break; } }
-  const alivePlayers = S.players.filter(p=>!isOut(p));
-  if(alivePlayers.length<=1){
-    log(`🏆 ${alivePlayers[0]?.name||"Nobody"} wins!`);
-    render();
-    alert(`${alivePlayers[0]?.name||"Nobody"} wins the game!`);
+  const alive = S.players.filter(p=>!isOut(p));
+  if(alive.length>1) Rules.endTurn(S, ui);
+  if(S.players.filter(p=>!isOut(p)).length<=1){
+    const w = S.players.find(p=>!isOut(p));
+    log(`🏆 ${w?w.name:"Nobody"} wins!`);
+    render(); renderTokens();
+    alert(`${w?w.name:"Nobody"} wins the game!`);
     return;
   }
-  startTurn();
+  render(); renderTokens();
 }
 
 const drawCard = (p, n)=> drawCards(S, p, n);
 
-// Roll and move: once per turn (Debug allows more), then the final space's effect applies.
+// Roll and move once per turn (Debug allows more); the final space's effect applies.
 function rollDice(){
-  const p = S.players[S.current];
-  if(p.cantMove){ alert(`${p.name} cannot move this turn.`); return; }
-  if(p.rolledThisTurn && !S.debug){ alert("You already rolled this turn."); return; }
-  const r = 1+Math.floor(Math.random()*6);
-  p.rolledThisTurn = true;
-  log(`🎲 ${p.name} rolled ${r}.`);
-  moveForward(S, p, r, ui);
-  landOn(S, p, ui);
+  if(!allowed(S).roll) return;
+  const r = ui.roll();
+  Rules.roll(S, r, ui);
   render(); renderTokens();
   const d = $("#dice"); if(d) d.textContent = r;
   return r;
@@ -293,6 +271,7 @@ function useAttack(atk){
 
   log(`${p.name}'s ${attacker.name} used ${atk.name} (-${effCost}⚡).`);
   atk.resolve(api);
+  p.actionUsed = true; S.phase = "After";
   render(); renderTokens();
 }
 
@@ -301,8 +280,10 @@ function render(){
   saveState();
   const p = S.players[S.current];
   $("#turnLabel").textContent = `${p.name}`;
-  $("#phaseLabel").textContent = `• ${p.hp} HP • ${p.energy} ⚡ • ${S.deck.length} in deck`;
+  $("#phaseLabel").textContent = `• ${S.phase} • ${p.hp} HP • ${p.energy} ⚡ • ${S.deck.length} in deck`;
 
+  const can = allowed(S);
+  $("#endTurnBtn").disabled = !can.end;
   const panel = $("#sidePanel");
   panel.innerHTML = "";
 
@@ -339,18 +320,23 @@ function render(){
     const costLabel = a.costOf ? "*" : a.cost;   // * = cost depends on roll/energy
     const row = h(`<div class="atk"><span>${a.name} <span style="color:var(--muted)">— ${a.note}</span></span><span class="cost">${costLabel}⚡</span></div>`);
     const use = btn("Use", ()=> useAttack(a));
-    use.disabled = !a.costOf && p.energy < a.cost;   // dynamic-cost attacks check at resolve time
+    use.disabled = !can.attack || (!a.costOf && p.energy < a.cost);   // dynamic-cost attacks check at resolve time
     row.appendChild(use);
     atkWrap.appendChild(row);
   });
   panel.appendChild(atkWrap);
+  const swRow = h(`<div class="controls"></div>`);
+  p.chars.forEach((c,ci)=>{ if(ci===p.activeIdx) return;
+    const sw = btn(`Switch to ${c.name}`, ()=>{ Rules.switchActive(S, ci); render(); });
+    sw.disabled = !can.switchChar; swRow.appendChild(sw); });
+  panel.appendChild(swRow);
 
   const dice = h(`<div class="section"><b>Dice & Movement</b></div>`);
   panel.appendChild(dice);
   const drow = h(`<div class="controls"></div>`);
   drow.appendChild(h(`<span id="dice">–</span>`));
   const rollB = btn("Roll 🎲", rollDice);
-  rollB.disabled = p.cantMove || (p.rolledThisTurn && !S.debug);
+  rollB.disabled = !can.roll;
   drow.appendChild(rollB);
   panel.appendChild(drow);
 
@@ -361,7 +347,8 @@ function render(){
     if(name){
       const def = cardByName(name);
       const s = h(`<div class="slot filled"><div class="slot-name">${name}</div><div class="slot-text">${def?def.text:""}</div></div>`);
-      s.appendChild(btn("Unequip", ()=>{ p.supports.splice(i,1); S.discard.push(name); log(`${p.name} unequipped ${name}.`); render(); }));
+      const un = btn("Unequip", ()=>{ p.supports.splice(i,1); S.discard.push(name); log(`${p.name} unequipped ${name}.`); render(); });
+      un.disabled = !can.cards; s.appendChild(un);
       slots.appendChild(s);
     } else {
       slots.appendChild(h(`<div class="slot empty">empty slot</div>`));
@@ -385,7 +372,11 @@ function render(){
   panel.appendChild(hand);
   const handCtrls = h(`<div class="controls" style="margin-top:6px"></div>`);
   if(S.debug) handCtrls.appendChild(btn("Draw +1", ()=>{ drawCard(p,1); render(); }));
-  handCtrls.appendChild(btn("Discard→+1⚡", ()=>{ if(p.hand.length){ S.discard.push(p.hand.pop()); p.energy++; log(`${p.name} discarded for +1 energy.`); render(); } }));
+  const discardB = btn("Discard→+1⚡", ()=>{
+    const i = ui.chooseCard(p.hand, "Discard which card for +1 energy?"); if(i==null) return;
+    const [c] = p.hand.splice(i, 1); S.discard.push(c); p.energy++; log(`${p.name} discarded ${c} for +1 energy.`); render();
+  });
+  discardB.disabled = !can.cards || !p.hand.length; handCtrls.appendChild(discardB);
   panel.appendChild(handCtrls);
 
   if(S.debug){
@@ -447,6 +438,7 @@ $("#cardPlay").onclick = ()=>{
   const name = p.hand[openCardIdx];
   const def = cardByName(name);
   if(def && def.type==="support"){
+    if(!allowed(S).cards){ alert("Supports are equipped in the Main phase, before your action."); return; }
     if((p.supports||[]).length>=2){ alert("Both support slots are full — unequip one first."); return; }
     p.hand.splice(openCardIdx, 1);
     p.supports.push(name);

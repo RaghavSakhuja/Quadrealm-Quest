@@ -231,6 +231,47 @@ test("withinRange filters opponents", () => {
   S.players[0].pos = "6,0"; S.players[1].pos = "8,0"; S.players[2].pos = "15,7";
   assert.deepEqual(Rules.withinRange(S, 0, 2), [1]);
 });
+/* ---- Turn phases ---- */
+test("a turn runs Move, Main, After", () => {
+  const S = two(); Rules.startTurn(S, stubUi({})); const p = S.players[0];
+  assert.equal(S.phase, "Move"); assert.deepEqual(Rules.allowed(S), { roll:true, cards:false, switchChar:false, attack:false, end:false, events:true });
+  Rules.roll(S, 1, stubUi({})); assert.equal(S.phase, "Main");
+  assert.deepEqual(Rules.allowed(S), { roll:false, cards:true, switchChar:true, attack:true, end:true, events:true });
+  Rules.switchActive(S, 1); assert.equal(p.activeIdx, 1); assert.equal(S.phase, "After");
+  assert.deepEqual(Rules.allowed(S), { roll:false, cards:false, switchChar:false, attack:false, end:true, events:true });
+});
+test("the start of a turn gives 1 energy and 1 card", () => {
+  const S = two(), p = S.players[0]; Rules.startTurn(S, stubUi({}));
+  assert.equal(p.energy, 1); assert.equal(p.hand.length, 1);
+});
+test("the start of a turn clears last turn's flags", () => {
+  const S = two(), p = S.players[0]; Object.assign(p, { movedThisTurn:true, actionUsed:true, attackedThisTurn:true, usedBasicThisTurn:true, energySpentThisTurn:3, attackDiscount:1, nextAttackBonus:2 });
+  Rules.startTurn(S, stubUi({}));
+  assert.deepEqual([p.movedThisTurn, p.actionUsed, p.attackedThisTurn, p.usedBasicThisTurn, p.energySpentThisTurn, p.attackDiscount, p.nextAttackBonus], [false,false,false,false,0,0,0]);
+});
+test("a player who cannot move skips to Main and can end their turn", () => {
+  const S = two(); S.players[0].noMoveNext = true; Rules.startTurn(S, stubUi({}));
+  assert.equal(S.phase, "Main"); assert.equal(Rules.allowed(S).end, true); assert.equal(S.players[0].noMoveNext, false);
+});
+test("start-of-turn HP is recorded after Forager heals", () => {
+  const S = mkGame([["knight","samurai","titan"],["archer","gambler","berserker"]]); const p = S.players[0];
+  p.hp = 4; p.pos = "15,10"; Rules.startTurn(S, stubUi({})); assert.equal(p.startTurnHp, 6);
+});
+test("skipMove goes from Move to Main with no roll", () => {
+  const S = two(); S.phase = "Move"; Rules.skipMove(S); assert.equal(S.phase, "Main"); assert.equal(S.players[0].movedThisTurn, false);
+});
+test("Debug can reroll in Main, and nothing else changes", () => {
+  const S = two(); S.phase = "Main"; S.debug = true;
+  assert.equal(Rules.allowed(S).roll, true); S.phase = "After"; assert.equal(Rules.allowed(S).roll, false); assert.equal(Rules.allowed(S).attack, false);
+});
+test("endTurn passes clockwise, skipping players who are out", () => {
+  const S = mkGame([["knight","cleric","titan"],["archer","gambler","berserker"],["samurai","ballista","tactician"]]);
+  S.players[1].hp = 0; S.phase = "After"; Rules.endTurn(S, stubUi({})); assert.equal(S.current, 2); assert.equal(S.phase, "Move");
+});
+test("Priestess' Blessing heals 1 at end of turn", () => {
+  const S = two(), p = S.players[0]; p.supports = ["Priestess' Blessing"]; p.hp = 50; Rules.endTurn(S, stubUi({})); assert.equal(p.hp, 51);
+});
+
 test("space centres sit on the 3216px board grid", () => {
   assert.deepEqual([Rules.spaceXY(0,0).x, Math.round(Rules.spaceXY(15,15).y)], [250, 2968]);
 });
