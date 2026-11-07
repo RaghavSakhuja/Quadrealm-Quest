@@ -30,16 +30,35 @@ test("deck has one copy of every card", () => {
   assert.equal(Rules.buildDeck().length, Rules.CARD_POOL.length);
 });
 
-const cd = (o) => Rules.combatDamage({ base:4, attackerId:"knight", attackerTerrain:null, defenderId:"knight", defenderTerrain:null, isAoe:false, ...o });
-test("Heated Edge: Swordsmen +2 in Volcano", () => { assert.equal(cd({ attackerId:"samurai", attackerTerrain:"Volcano" }), 6); });
-test("Eagle's View: Marksmen +1 on AOE in Mountain, includes Ballista", () => {
-  assert.equal(cd({ attackerId:"ballista", attackerTerrain:"Mountain", isAoe:true }), 5);
-  assert.equal(cd({ attackerId:"ballista", attackerTerrain:"Mountain", isAoe:false }), 4);
+const pl = (ids, pos, active=0) => { const p = Rules.createPlayer({ name:"P", color:"#fff", charIds:ids, activeIdx:active }); p.pos = pos; return p; };
+const CD = (attacker, defender, o) => Rules.combatDamage({ base:4, attacker, defender, kind:"skill", isArea:false, ...o });
+const none = ["knight","cleric","titan"];
+test("realm effects read the active character only", () => {
+  assert.equal(CD(pl(["samurai","cleric","titan"],"4,14"), pl(none,"7,0")), 6);
+  assert.equal(CD(pl(["samurai","cleric","titan"],"4,14",1), pl(none,"7,0")), 4);
 });
-test("Natural Cover: Marksmen take -2 in Forest, never below 0", () => {
-  assert.equal(cd({ defenderId:"ballista", defenderTerrain:"Forest" }), 2);
-  assert.equal(cd({ base:2, defenderId:"archer", defenderTerrain:"Forest" }), 0);
-  assert.equal(cd({ base:1, defenderId:"archer", defenderTerrain:"Forest" }), 0);
+test("Eagle's View is for area attacks; every target gets it", () => {
+  const a = pl(["ballista","cleric","titan"],"10,1");
+  assert.equal(CD(a, pl(none,"7,0"), { isArea:true }), 5); assert.equal(CD(a, pl(none,"7,0")), 4);
+});
+test("Natural Cover takes 2 off, only for an active Long Range in Forest", () => {
+  assert.equal(CD(pl(none,"7,0"), pl(["ballista","cleric","titan"],"15,10")), 2);
+  assert.equal(CD(pl(none,"7,0"), pl(["ballista","cleric","titan"],"15,10",1)), 4);
+});
+test("the floor applies only at the end", () => {
+  const a = pl(none,"11,13"), d = pl(["archer","cleric","titan"],"15,10");
+  assert.equal(CD(a, d, { base:2, kind:"basic" }), 1);
+  assert.equal(CD(a, d, { base:0, kind:"basic" }), 0);
+});
+test("bonuses stack in order", () => {
+  const a = pl(["samurai","cleric","titan"],"4,12"); a.supports = ["The Titan's Gauntlet"];
+  assert.equal(CD(a, pl(none,"7,0"), { kind:"basic", base:2 }), 6);
+});
+test("a next-attack bonus from a card is added", () => {
+  const a = pl(none,"7,0"); a.nextAttackBonus = 2; assert.equal(CD(a, pl(none,"7,0")), 6);
+});
+test("Wildcards are never affected", () => {
+  assert.equal(CD(pl(["gambler","cleric","titan"],"4,14"), pl(["tactician","cleric","titan"],"15,10")), 4);
 });
 test("Unyielding Fury needs an active Brute in Hot Spring", () => {
   const p = Rules.createPlayer({ name:"P", color:"#fff", charIds:["titan","knight","cleric"], activeIdx:0 });

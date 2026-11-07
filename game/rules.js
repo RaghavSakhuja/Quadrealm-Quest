@@ -170,11 +170,16 @@ function activeType(p){ return typeOf(activeChar(p).id); }
 function distinctTypes(p){ return new Set(p.chars.map(c=>typeOf(c.id))).size; }
 
 /* ---- Realm modifiers: they read the active character's type and the realm of the piece ---- */
-function combatDamage({ base, attackerId, attackerTerrain, defenderId, defenderTerrain, isAoe }){
+// Damage order: base, attacker's realm, defender's realm, supports, board space, events. Floor at 0 only at the end.
+function combatDamage({ base, attacker, defender, kind, isArea }){
   let dmg = base;
-  if(typeOf(attackerId)==="Close Range" && attackerTerrain==="Volcano") dmg += 2;        // Heated Edge
-  if(isAoe && typeOf(attackerId)==="Long Range" && attackerTerrain==="Mountain") dmg += 1; // Eagle's View
-  if(typeOf(defenderId)==="Long Range" && defenderTerrain==="Forest") dmg -= 2;          // Natural Cover
+  const aType = activeType(attacker), aRealm = realmOf(attacker.pos);
+  if(aType==="Close Range" && aRealm==="Volcano") dmg += 2;                              // Heated Edge
+  if(isArea && aType==="Long Range" && aRealm==="Mountain") dmg += 1;                    // Eagle's View
+  if(activeType(defender)==="Long Range" && realmOf(defender.pos)==="Forest") dmg -= 2;  // Natural Cover
+  if(kind==="basic" && attacker.supports.includes("The Titan's Gauntlet")) dmg += 1;
+  dmg += spaceDamageBonus(attacker.pos, kind);
+  dmg += attacker.nextAttackBonus;
   return Math.max(0, dmg);
 }
 function startRegen(p){

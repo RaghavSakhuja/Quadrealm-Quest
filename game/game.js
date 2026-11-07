@@ -6,7 +6,7 @@ const SAVE_KEY = "quadrealm_save_v4";
 
 const { ROSTER, CARDS, CARD_POOL, cardByName, buildDeck, shuffle, drawCards, say, typeOf, activeChar, activeType, distinctTypes,
   isOut, loseHp, selfDamage, heal, combatDamage, startRegen, SAVE_VERSION, isCompatibleSave, createPlayer, opponents,
-  SPACES, realmOf, spaceLabel, moveForward, landOn, spaceDamageBonus, spaceCostCut, onDoubleSpace } = Rules;
+  SPACES, realmOf, spaceLabel, moveForward, landOn, spaceCostCut, onDoubleSpace } = Rules;
 
 const PLAYER_COLORS = ["#e6b450","#58c6ff","#68d391","#ff6b6b"];
 
@@ -219,16 +219,13 @@ const ui = {
 /* ========================= ACTIONS ========================= */
 function hasSupport(p, name){ return (p.supports||[]).includes(name); }
 
-function realmDamage(defender, base, attacker, isAoe){
-  if(!isAoe && pendingBaseBonus){ base += pendingBaseBonus; pendingBaseBonus = 0; } // Titan's Gauntlet
-  const dmg = combatDamage({ base, attackerId:activeChar(attacker).id, attackerTerrain:realmOf(attacker.pos),
-    defenderId:activeChar(defender).id, defenderTerrain:realmOf(defender.pos), isAoe });
+function realmDamage(defender, base, attacker, isArea, kind){
+  const dmg = combatDamage({ base, attacker, defender, kind, isArea });
   loseHp(defender, dmg);
-  log(`  → ${defender.name} takes ${dmg}${isAoe?" (AOE)":""}.`);
+  log(`  → ${defender.name} takes ${dmg}.`);
   if(isOut(defender)) log(`💀 ${defender.name} is out!`);
   render(); renderTokens();
 }
-let pendingBaseBonus = 0;   // +damage applied to the next non-AOE hit
 function dealSelfDamage(p, amount){
   const took = selfDamage(p, amount);
   log(took ? `  → ${p.name} takes ${amount} self-damage.` : `  → ${p.name} ignores ${amount} self-damage (Unyielding Fury).`);
@@ -276,18 +273,17 @@ function useAttack(atk){
   p.energy -= effCost;
   p.energySpentThisTurn = (p.energySpentThisTurn||0) + effCost;
   if(p.attackDiscount){ p.attackDiscount = 0; }   // discount consumed by this attack
-  pendingBaseBonus = (atkIndex===0 && hasSupport(p, "The Titan's Gauntlet")) ? 1 : 0;   // base +1 dmg
-  if(atk.target==="enemy") pendingBaseBonus += spaceDamageBonus(p.pos, ["basic","skill","ultimate"][atkIndex]);
+  const kind = ["basic","skill","ultimate"][atkIndex];
 
   const api = {
     player:p, target, roll, energyUsed:effCost,
-    dmg:(n)=>{ if(target) realmDamage(target, n, p, false); },
-    aoe:(n)=> others(target).forEach(o=> realmDamage(o, n, p, true)),
-    aoeAll:(n)=> others().forEach(o=> realmDamage(o, n, p, true)),
+    dmg:(n)=>{ if(target) realmDamage(target, n, p, false, kind); },
+    aoe:(n)=> others(target).forEach(o=> realmDamage(o, n, p, true, kind)),
+    aoeAll:(n)=> others().forEach(o=> realmDamage(o, n, p, true, kind)),
     selfDmg:(n)=> dealSelfDamage(p, n),
     heal:(n)=> healPlayer(p, n),
-    steal:(n)=>{ if(target){ realmDamage(target, n, p, false); healPlayer(p, n); } },
-    stealAll:(n)=>{ others().forEach(o=> realmDamage(o, n, p, true)); if(n>0) healPlayer(p, n); },
+    steal:(n)=>{ if(target){ realmDamage(target, n, p, false, kind); healPlayer(p, n); } },
+    stealAll:(n)=>{ others().forEach(o=> realmDamage(o, n, p, true, kind)); if(n>0) healPlayer(p, n); },
     draw:(n)=> drawCard(p, n),
     noMove:(o)=>{ o.noMoveNext=true; log(`  → ${o.name} cannot move next turn.`); },
     swap:()=>{ [p.pos,p.trail,target.pos,target.trail]=[target.pos,target.trail,p.pos,p.trail]; log(`  → swapped pieces with ${target.name}.`); },
