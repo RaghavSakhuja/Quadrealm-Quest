@@ -1,3 +1,5 @@
+> Superseded where it conflicts by `2026-11-08-official-rulebook-rework-design.md`.
+
 # Turn Phases — Design
 
 Date: 2026-11-01

@@ -1,3 +1,5 @@
+> Superseded where it conflicts by `2026-11-08-official-rulebook-rework-design.md`.
+
 # Board model and auto-move — design
 
 ## Why
