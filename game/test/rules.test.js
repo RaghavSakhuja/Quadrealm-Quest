@@ -272,6 +272,114 @@ test("Priestess' Blessing heals 1 at end of turn", () => {
   const S = two(), p = S.players[0]; p.supports = ["Priestess' Blessing"]; p.hp = 50; Rules.endTurn(S, stubUi({})); assert.equal(p.hp, 51);
 });
 
+/* ---- Attacks ---- */
+const game = (a, d, o={}) => { const S = mkGame([a,d,...(o.more||[])]); S.phase = "Main"; S.players.forEach(p => p.pos = "7,0"); return S; };
+test("cancelling the target never rolls", () => {
+  const S = game(["gambler","cleric","titan"],["archer","knight","berserker"],{ more:[["samurai","ballista","tactician"]] }); S.players[0].energy = 4;
+  const ui = stubUi({ picks:[null], rolls:[6] });
+  assert.equal(Rules.attackFlow(S, 2, ui), "cancelled"); assert.equal(ui.rollCount, 0); assert.equal(S.players[0].energy, 4); assert.equal(S.phase, "Main");
+});
+test("Game of Dice: cost rounds down; an unaffordable roll uses the action", () => {
+  const S = game(["gambler","cleric","titan"],["archer","knight","berserker"]); const p = S.players[0], d = S.players[1];
+  p.energy = 1; const hp = d.hp;
+  assert.equal(Rules.attackFlow(S, 1, stubUi({ rolls:[6] })), "unaffordable");
+  assert.equal(p.energy, 1); assert.equal(d.hp, hp); assert.equal(S.phase, "After");
+  S.phase = "Main"; assert.equal(Rules.attackCost(p, 1, 3, false), 1);
+});
+test("a fixed cost that can't be paid stops before anything happens", () => {
+  const S = game(["knight","cleric","titan"],["archer","gambler","berserker"]); S.players[0].energy = 1; const ui = stubUi({});
+  assert.equal(Rules.attackFlow(S, 2, ui), "cancelled"); assert.equal(S.phase, "Main"); assert.equal(S.players[0].energy, 1);
+});
+test("attack cost: Arcane Efficiency, a card discount and the space all cut it, down to 0", () => {
+  const p = pl(["knight","cleric","titan"],"12,13"); p.supports = ["Arcane Efficiency"]; p.attackDiscount = 1;
+  assert.equal(Rules.attackCost(p, 1, null, false), 0); assert.equal(Rules.attackCost(p, 2, null, false), 1); assert.equal(Rules.attackCost(p, 2, null, true), 0);
+});
+test("splash hits other opponents in the target's realm only", () => {
+  const S = game(["archer","cleric","titan"],["knight","gambler","berserker"],{ more:[["samurai","ballista","tactician"],["cleric","knight","titan"]] });
+  const [p,t,same,far] = S.players; p.energy = 4; t.pos = "10,1"; same.pos = "12,3"; far.pos = "4,14";
+  const [a,b,c] = [t.hp,same.hp,far.hp]; Rules.attackFlow(S, 2, stubUi({ picks:[1] }));
+  assert.deepEqual([a-t.hp, b-same.hp, c-far.hp], [4,2,0]);
+});
+test("a target in a corridor brings no splash", () => {
+  const S = game(["archer","cleric","titan"],["knight","gambler","berserker"],{ more:[["samurai","ballista","tactician"]] });
+  const [p,t,o] = S.players; p.energy = 4; const h = o.hp; Rules.attackFlow(S, 2, stubUi({ picks:[1] })); assert.equal(o.hp, h); assert.equal(t.maxHp - t.hp, 4);
+});
+test("Piercing Spear in Mountain gives +1 to every target", () => {
+  const S = game(["ballista","cleric","titan"],["knight","gambler","berserker"],{ more:[["samurai","archer","tactician"]] });
+  const [p,t,o] = S.players; p.energy = 3; p.pos = "10,1"; t.pos = "11,2"; o.pos = "12,3"; const [a,b] = [t.hp,o.hp];
+  Rules.attackFlow(S, 1, stubUi({ picks:[1] })); assert.deepEqual([a-t.hp, b-o.hp], [4,4]);
+});
+test("Spirit Drain hits your realm and heals per opponent hit", () => {
+  const S = game(["necromancer","knight","titan"],["archer","gambler","berserker"],{ more:[["samurai","ballista","tactician"],["cleric","knight","titan"]] });
+  const [p,a,b,far] = S.players; p.energy = 4; p.hp = 50; p.pos = "10,1"; a.pos = "11,2"; b.pos = "12,3"; far.pos = "7,0"; const h = far.hp;
+  Rules.attackFlow(S, 1, stubUi({})); assert.equal(p.hp, 54); assert.equal(far.hp, h);
+});
+test("Spirit Drain from a corridor hits nobody and doesn't crash", () => {
+  const S = game(["necromancer","knight","titan"],["archer","gambler","berserker"]); const p = S.players[0]; p.energy = 4; p.hp = 50;
+  assert.equal(Rules.attackFlow(S, 1, stubUi({})), "done"); assert.equal(p.hp, 50);
+});
+test("Landmine hits every opponent, wherever they are", () => {
+  const S = game(["tactician","knight","titan"],["archer","gambler","berserker"],{ more:[["samurai","ballista","cleric"]] });
+  const [p,a,b] = S.players; p.energy = 3; a.pos = "4,14"; const [x,y] = [a.hp,b.hp];
+  Rules.attackFlow(S, 2, stubUi({})); assert.deepEqual([x-a.hp, y-b.hp], [5,5]);
+});
+test("steal heals only the damage dealt", () => {
+  const S = game(["necromancer","knight","titan"],["archer","gambler","berserker"]); const [p,d] = S.players;
+  p.energy = 5; p.hp = 40; d.hp = 3; Rules.attackFlow(S, 2, stubUi({})); assert.equal(p.hp, 43); assert.equal(p.noMoveNext, true);
+});
+test("Molten Power turns an attack's healing into damage", () => {
+  assert.equal(Rules.moltenDamage(5), 7); assert.equal(Rules.moltenDamage(2), 3);
+  const S = game(["cleric","knight","titan"],["archer","gambler","berserker"]); const [p,d] = S.players;
+  p.energy = 3; p.hp = 50; p.pos = "4,14"; const h = d.hp; Rules.attackFlow(S, 1, stubUi({}));
+  assert.equal(p.hp, 50); assert.equal(h - d.hp, 5);
+});
+test("Potion Blast asks for a target only under Molten Power", () => {
+  const S = game(["cleric","knight","titan"],["archer","gambler","berserker"]); const [p,d] = S.players;
+  p.energy = 4; p.hp = 50; Rules.attackFlow(S, 2, stubUi({})); assert.equal(p.hp, 56);
+  S.phase = "Main"; p.energy = 4; p.pos = "4,14"; const h = d.hp; Rules.attackFlow(S, 2, stubUi({}));
+  assert.equal(h - d.hp, 9); assert.equal(p.hp, 56);
+});
+test("Molten Power converts a whole attack's healing in one go", () => {
+  const S = game(["necromancer","knight","titan"],["archer","gambler","berserker"],{ more:[["samurai","ballista","tactician"]] }); const [p,a,b] = S.players;
+  p.energy = 4; p.hp = 50; p.pos = "4,14"; a.pos = "4,13"; b.pos = "3,13"; const [x,y] = [a.hp,b.hp];
+  Rules.attackFlow(S, 1, stubUi({ picks:[1] }));
+  assert.equal(p.hp, 50); assert.deepEqual([x-a.hp, y-b.hp], [2+6,2]);
+});
+test("Relentless Assault: one free skill, new target, no retrigger", () => {
+  const S = game(["berserker","knight","cleric"],["archer","gambler","titan"],{ more:[["samurai","ballista","tactician"]] });
+  const [p,a,b] = S.players; p.pos = "10,1"; p.energy = 0; const [x,y,h] = [a.hp,b.hp,p.hp];
+  Rules.attackFlow(S, 0, stubUi({ picks:[1,2] }));
+  assert.deepEqual([x-a.hp, y-b.hp, h-p.hp], [2,4,1]); assert.equal(p.energy, 0);
+});
+test("Relentless Assault is skipped if the attacker died or no opponents remain", () => {
+  const S = game(["titan","knight","cleric"],["archer","gambler","berserker"]); const [p,d] = S.players;
+  p.pos = "10,1"; p.hp = 1; const ui = stubUi({}); Rules.attackFlow(S, 0, ui);
+  assert.equal(p.hp, 0); assert.equal(d.maxHp - d.hp, 3); assert.equal(ui.asked.length, 0);
+});
+test("one action: the phase blocks a second attack", () => {
+  const S = game(["knight","cleric","titan"],["archer","gambler","berserker"]); Rules.attackFlow(S, 0, stubUi({}));
+  assert.equal(S.phase, "After"); assert.equal(Rules.allowed(S).attack, false);
+  assert.equal(S.players[0].attackedThisTurn, true); assert.equal(S.players[0].usedBasicThisTurn, true);
+});
+test("a next-attack bonus and discount are spent by one attack", () => {
+  const S = game(["knight","cleric","titan"],["archer","gambler","berserker"]); const [p,d] = S.players;
+  p.nextAttackBonus = 2; p.attackDiscount = 1; p.energy = 1; Rules.attackFlow(S, 1, stubUi({}));
+  assert.equal(d.maxHp - d.hp, 7); assert.equal(p.energy, 0); assert.equal(p.nextAttackBonus, 0); assert.equal(p.attackDiscount, 0);
+});
+test("Chaos Swap trades places with no landing, and resets the double-event space", () => {
+  const S = game(["tactician","knight","cleric"],["archer","gambler","berserker"]); const [p,d] = S.players;
+  p.energy = 2; p.pos = "15,5"; p.doubleUsedAt = "15,5"; d.pos = "14,6"; const h = p.hp; Rules.attackFlow(S, 1, stubUi({}));
+  assert.equal(p.pos, "14,6"); assert.equal(d.pos, "15,5"); assert.equal(p.hp, h); assert.equal(p.doubleUsedAt, null);
+});
+test("Tracking Radar adds 3 if the target moved on their last turn", () => {
+  const S = game(["ballista","knight","cleric"],["samurai","gambler","berserker"]); const [p,d] = S.players;
+  p.energy = 4; d.movedThisTurn = true; Rules.attackFlow(S, 2, stubUi({})); assert.equal(d.maxHp - d.hp, 8);
+});
+test("Sacrificial Rampage costs half your team HP, rounded down", () => {
+  const S = game(["berserker","knight","cleric"],["samurai","gambler","titan"]); const [p] = S.players;
+  p.energy = 5; p.hp = 41; Rules.attackFlow(S, 2, stubUi({})); assert.equal(p.hp, 21);
+});
+
 test("space centres sit on the 3216px board grid", () => {
   assert.deepEqual([Rules.spaceXY(0,0).x, Math.round(Rules.spaceXY(15,15).y)], [250, 2968]);
 });

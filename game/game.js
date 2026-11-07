@@ -5,8 +5,8 @@ const ASSET = {
 const SAVE_KEY = "quadrealm_save_v4";
 
 const { ROSTER, CARDS, CARD_POOL, cardByName, buildDeck, shuffle, drawCards, say, typeOf, activeChar, activeType, distinctTypes,
-  isOut, loseHp, selfDamage, heal, combatDamage, SAVE_VERSION, isCompatibleSave, createPlayer, opponents,
-  SPACES, realmOf, spaceLabel, allowed, spaceCostCut, onDoubleSpace } = Rules;
+  isOut, loseHp, selfDamage, heal, SAVE_VERSION, isCompatibleSave, createPlayer, opponents,
+  SPACES, realmOf, spaceLabel, allowed, attackCost, onDoubleSpace } = Rules;
 
 const PLAYER_COLORS = ["#e6b450","#58c6ff","#68d391","#ff6b6b"];
 
@@ -197,13 +197,6 @@ const ui = {
 /* ========================= ACTIONS ========================= */
 function hasSupport(p, name){ return (p.supports||[]).includes(name); }
 
-function realmDamage(defender, base, attacker, isArea, kind){
-  const dmg = combatDamage({ base, attacker, defender, kind, isArea });
-  loseHp(defender, dmg);
-  log(`  → ${defender.name} takes ${dmg}.`);
-  if(isOut(defender)) log(`💀 ${defender.name} is out!`);
-  render(); renderTokens();
-}
 function dealSelfDamage(p, amount){
   const took = selfDamage(p, amount);
   log(took ? `  → ${p.name} takes ${amount} self-damage.` : `  → ${p.name} ignores ${amount} self-damage (Unyielding Fury).`);
@@ -215,12 +208,6 @@ function healPlayer(p, amount){
   render(); renderTokens();
 }
 
-function pickOpponent(){
-  const choices = opponents(S, S.current).map(pi=>{ const pl=S.players[pi];
-    return { pi, label:`${pl.name} — ${pl.hp} HP, active ${activeChar(pl).name}` }; });
-  const pick = promptChoice(choices, "Attack which player?");
-  return pick ? pick.pi : null;
-}
 function promptChoice(choices, title="Choose target:"){
   if(choices.length===0){ alert("No valid targets."); return null; }
   if(choices.length===1) return choices[0];
@@ -229,49 +216,9 @@ function promptChoice(choices, title="Choose target:"){
   return (!isNaN(idx) && choices[idx]) ? choices[idx] : null;
 }
 
-function useAttack(atk){
-  const p = S.players[S.current], attacker = activeChar(p);
-  const roll = atk.needsRoll ? (1+Math.floor(Math.random()*6)) : null;
-  if(roll!=null){ const d=$("#dice"); if(d) d.textContent=roll; log(`🎲 ${p.name} rolled ${roll}.`); }
-
-  const atkIndex = attacker.attacks.indexOf(atk);   // 0 basic, 1 skill, 2 ultimate
-  const cost = atk.costOf ? atk.costOf(p, roll) : atk.cost;
-  let supportCut = 0;
-  if(atkIndex===1 && hasSupport(p, "Arcane Efficiency")) supportCut += 1;   // skill cost -1
-  const effCost = Math.max(0, cost - (p.attackDiscount||0) - supportCut - spaceCostCut(p.pos));
-  if(p.energy < effCost){ alert(`Not enough energy (need ${effCost}).`); return; }
-
-  let target=null;
-  if(atk.target==="enemy"){
-    const pi = pickOpponent(); if(pi==null) return;
-    target = S.players[pi];
-  }
-  const others = (skip)=> opponents(S, S.current).map(i=>S.players[i]).filter(o=>o!==skip);
-
-  p.energy -= effCost;
-  p.energySpentThisTurn = (p.energySpentThisTurn||0) + effCost;
-  if(p.attackDiscount){ p.attackDiscount = 0; }   // discount consumed by this attack
-  const kind = ["basic","skill","ultimate"][atkIndex];
-
-  const api = {
-    player:p, target, roll, energyUsed:effCost,
-    dmg:(n)=>{ if(target) realmDamage(target, n, p, false, kind); },
-    aoe:(n)=> others(target).forEach(o=> realmDamage(o, n, p, true, kind)),
-    aoeAll:(n)=> others().forEach(o=> realmDamage(o, n, p, true, kind)),
-    selfDmg:(n)=> dealSelfDamage(p, n),
-    heal:(n)=> healPlayer(p, n),
-    steal:(n)=>{ if(target){ realmDamage(target, n, p, false, kind); healPlayer(p, n); } },
-    stealAll:(n)=>{ others().forEach(o=> realmDamage(o, n, p, true, kind)); if(n>0) healPlayer(p, n); },
-    draw:(n)=> drawCard(p, n),
-    noMove:(o)=>{ o.noMoveNext=true; log(`  → ${o.name} cannot move next turn.`); },
-    swap:()=>{ [p.pos,p.trail,target.pos,target.trail]=[target.pos,target.trail,p.pos,p.trail]; log(`  → swapped pieces with ${target.name}.`); },
-    targetMoved: !!(target && target.movedThisTurn),
-    log:(m)=> log(m),
-  };
-
-  log(`${p.name}'s ${attacker.name} used ${atk.name} (-${effCost}⚡).`);
-  atk.resolve(api);
-  p.actionUsed = true; S.phase = "After";
+function useAttack(atkIndex){
+  const result = Rules.attackFlow(S, atkIndex, ui);
+  if(result==="cancelled") return;
   render(); renderTokens();
 }
 
@@ -316,11 +263,11 @@ function render(){
   // Only the active character attacks.
   panel.appendChild(h(`<div class="section"><b>Attacks — ${activeChar(p).name}</b></div>`));
   const atkWrap = h(`<div class="attacks"></div>`);
-  activeChar(p).attacks.forEach(a=>{
-    const costLabel = a.costOf ? "*" : a.cost;   // * = cost depends on roll/energy
+  activeChar(p).attacks.forEach((a,ai)=>{
+    const cost = attackCost(p, ai, null, false), costLabel = a.costOf ? "*" : cost;   // * = cost depends on roll/energy
     const row = h(`<div class="atk"><span>${a.name} <span style="color:var(--muted)">— ${a.note}</span></span><span class="cost">${costLabel}⚡</span></div>`);
-    const use = btn("Use", ()=> useAttack(a));
-    use.disabled = !can.attack || (!a.costOf && p.energy < a.cost);   // dynamic-cost attacks check at resolve time
+    const use = btn("Use", ()=> useAttack(ai));
+    use.disabled = !can.attack || (!a.costOf && p.energy < cost);   // a cost set by the roll is checked at resolve time
     row.appendChild(use);
     atkWrap.appendChild(row);
   });

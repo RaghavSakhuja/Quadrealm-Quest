@@ -1,60 +1,60 @@
 // Game data and pure rules. No DOM access: loaded by the browser (window.Rules) and by Node tests (require).
 (function(){
 // Character roster from the rulebook. img = file in Cards/.
-// Each attack: target ("enemy"|"ally"|"none"), optional needsRoll/costOf, and resolve(api).
+// Each attack: target ("enemy"|"none"), optional area/needsRoll/costOf, and resolve(api). Index 0 basic, 1 skill, 2 ultimate.
 const ROSTER = [
   { id:"archer", name:"Archer", hp:20, img:"Archer.png", attacks:[
-    {name:"Simple Arrow", cost:0, note:"2 dmg", target:"enemy", resolve:a=>a.dmg(2)},
-    {name:"Heavy Arrow", cost:2, note:"4 dmg", target:"enemy", resolve:a=>a.dmg(4)},
-    {name:"Exploding Arrow", cost:4, note:"4 dmg + 2 AOE (same realm)", target:"enemy", resolve:a=>{ a.dmg(4); a.aoe(2); }},
+    {name:"Simple Arrow", cost:0, note:"2 dmg", target:"enemy", resolve:a=>a.hit(2)},
+    {name:"Heavy Arrow", cost:2, note:"4 dmg", target:"enemy", resolve:a=>a.hit(4)},
+    {name:"Exploding Arrow", cost:4, note:"4 dmg + 2 to others in the target's realm", target:"enemy", area:true, resolve:a=>{ a.hit(4); a.splash(2); }},
   ]},
   { id:"ballista", name:"Ballista Engineer", hp:20, img:"Ballista Engineer.png", attacks:[
-    {name:"Bolt Launcher", cost:0, note:"2 dmg", target:"enemy", resolve:a=>a.dmg(2)},
-    {name:"Piercing Spear", cost:3, note:"3 dmg to target + all other enemies", target:"enemy", resolve:a=>{ a.dmg(3); a.aoe(3); }},
-    {name:"Tracking Radar", cost:4, note:"5 dmg (+3 if target moved)", target:"enemy", resolve:a=>a.dmg(5 + (a.targetMoved?3:0))},
+    {name:"Bolt Launcher", cost:0, note:"2 dmg", target:"enemy", resolve:a=>a.hit(2)},
+    {name:"Piercing Spear", cost:3, note:"3 dmg to the target and others in its realm", target:"enemy", area:true, resolve:a=>{ a.hit(3); a.splash(3); }},
+    {name:"Tracking Radar", cost:4, note:"5 dmg (+3 if target moved)", target:"enemy", resolve:a=>a.hit(5 + (a.targetMoved?3:0))},
   ]},
   { id:"knight", name:"Knight", hp:30, img:"Knight.png", attacks:[
-    {name:"Thrusting Sword", cost:0, note:"2 dmg", target:"enemy", resolve:a=>a.dmg(2)},
-    {name:"Heavy Blow", cost:2, note:"5 dmg", target:"enemy", resolve:a=>a.dmg(5)},
-    {name:"Excalibur Strike", cost:3, note:"7 dmg", target:"enemy", resolve:a=>a.dmg(7)},
+    {name:"Thrusting Sword", cost:0, note:"2 dmg", target:"enemy", resolve:a=>a.hit(2)},
+    {name:"Heavy Blow", cost:2, note:"5 dmg", target:"enemy", resolve:a=>a.hit(5)},
+    {name:"Excalibur Strike", cost:3, note:"7 dmg", target:"enemy", resolve:a=>a.hit(7)},
   ]},
   { id:"samurai", name:"Samurai", hp:25, img:"Samurai.png", attacks:[
-    {name:"Quick Slash", cost:0, note:"2 dmg", target:"enemy", resolve:a=>a.dmg(2)},
-    {name:"Shadow Step", cost:2, note:"4 dmg + stop target move", target:"enemy", resolve:a=>{ a.dmg(4); a.noMove(a.target); }},
-    {name:"Warrior's Stand", cost:4, note:"9 dmg + stop target move", target:"enemy", resolve:a=>{ a.dmg(9); a.noMove(a.target); }},
+    {name:"Quick Slash", cost:0, note:"2 dmg", target:"enemy", resolve:a=>a.hit(2)},
+    {name:"Shadow Step", cost:2, note:"4 dmg + stop target move", target:"enemy", resolve:a=>{ a.hit(4); a.noMove(a.target); }},
+    {name:"Warrior's Stand", cost:4, note:"9 dmg + stop target move", target:"enemy", resolve:a=>{ a.hit(9); a.noMove(a.target); }},
   ]},
   { id:"cleric", name:"Cleric", hp:15, img:"Cleric.png", attacks:[
-    {name:"Water Ball", cost:0, note:"2 dmg", target:"enemy", resolve:a=>a.dmg(2)},
-    {name:"Misty Fog", cost:3, note:"2 dmg + heal 2", target:"enemy", resolve:a=>{ a.dmg(2); a.heal(2); }},
+    {name:"Water Ball", cost:0, note:"2 dmg", target:"enemy", resolve:a=>a.hit(2)},
+    {name:"Misty Fog", cost:3, note:"2 dmg + heal 2", target:"enemy", resolve:a=>{ a.hit(2); a.heal(2); }},
     {name:"Potion Blast", cost:4, note:"Heal 6", target:"none", resolve:a=>a.heal(6)},
   ]},
   { id:"necromancer", name:"Necromancer", hp:20, img:"Necromancer.png", attacks:[
-    {name:"Spirit Orb", cost:0, note:"2 dmg", target:"enemy", resolve:a=>a.dmg(2)},
-    {name:"Spirit Drain", cost:4, note:"Steal 2 HP from each enemy", target:"none", resolve:a=>a.stealAll(2)},
+    {name:"Spirit Orb", cost:0, note:"2 dmg", target:"enemy", resolve:a=>a.hit(2)},
+    {name:"Spirit Drain", cost:4, note:"Opponents in your realm lose 2; heal 2 for each", target:"none", area:true, resolve:a=>a.drain(2,2)},
     {name:"Dark Resurrection", cost:5, note:"Steal 5 HP, self can't move next turn", target:"enemy", resolve:a=>{ a.steal(5); a.noMove(a.player); }},
   ]},
   { id:"berserker", name:"Berserker", hp:30, img:"Berserker.png", attacks:[
-    {name:"Stone Throw", cost:0, note:"2 dmg", target:"enemy", resolve:a=>a.dmg(2)},
-    {name:"Rampage", cost:2, note:"4 dmg + 1 self", target:"enemy", resolve:a=>{ a.dmg(4); a.selfDmg(1); }},
-    {name:"Sacrificial Rampage", cost:5, note:"15 dmg + lose half your HP", target:"enemy", resolve:a=>{ a.dmg(15); a.selfDmg(Math.floor(a.player.hp/2)); }},
+    {name:"Stone Throw", cost:0, note:"2 dmg", target:"enemy", resolve:a=>a.hit(2)},
+    {name:"Rampage", cost:2, note:"4 dmg + 1 self", target:"enemy", resolve:a=>{ a.hit(4); a.selfDmg(1); }},
+    {name:"Sacrificial Rampage", cost:5, note:"15 dmg + lose half your HP", target:"enemy", resolve:a=>{ a.hit(15); a.selfDmg(Math.floor(a.player.hp/2)); }},
   ]},
   { id:"titan", name:"Titan Warlord", hp:35, img:"Titan Warloard.png", attacks:[
-    {name:"Battle Cry", cost:0, note:"3 dmg + 1 self", target:"enemy", resolve:a=>{ a.dmg(3); a.selfDmg(1); }},
-    {name:"Devastating Blow", cost:2, note:"6 dmg + 2 self", target:"enemy", resolve:a=>{ a.dmg(6); a.selfDmg(2); }},
+    {name:"Battle Cry", cost:0, note:"3 dmg + 1 self", target:"enemy", resolve:a=>{ a.hit(3); a.selfDmg(1); }},
+    {name:"Devastating Blow", cost:2, note:"6 dmg + 2 self", target:"enemy", resolve:a=>{ a.hit(6); a.selfDmg(2); }},
     {name:"Apocalyptic Slam", cost:0, note:"3× all energy as dmg + self = energy", target:"enemy",
-      costOf:p=>p.energy, resolve:a=>{ a.dmg(3*a.energyUsed); a.selfDmg(a.energyUsed); }},
+      costOf:p=>p.energy, resolve:a=>{ a.hit(3*a.energyUsed); a.selfDmg(a.energyUsed); }},
   ]},
   { id:"gambler", name:"Gambler", hp:25, img:"Gambler.png", attacks:[
-    {name:"All or Nothing", cost:0, note:"3 dmg (0 if roll 1-3)", target:"enemy", needsRoll:true, resolve:a=>a.dmg(a.roll<=3?0:3)},
-    {name:"Game of Dice", cost:0, note:"dmg = roll (halved if even), cost = ⌈roll/2⌉", target:"enemy", needsRoll:true,
-      costOf:(p,roll)=>Math.ceil(roll/2), resolve:a=>a.dmg(a.roll%2===0?Math.floor(a.roll/2):a.roll)},
+    {name:"All or Nothing", cost:0, note:"3 dmg (0 if roll 1-3)", target:"enemy", needsRoll:true, resolve:a=>a.hit(a.roll<=3?0:3)},
+    {name:"Game of Dice", cost:0, note:"dmg = roll (halved if even), cost = half the roll, rounded down", target:"enemy", needsRoll:true,
+      costOf:(p,roll)=>Math.floor(roll/2), resolve:a=>a.hit(a.roll%2===0?Math.floor(a.roll/2):a.roll)},
     {name:"Fate's Hand", cost:4, note:"If roll 5-6: 10 dmg + draw 2", target:"enemy", needsRoll:true,
-      resolve:a=>{ if(a.roll>=5){ a.dmg(10); a.draw(2); } else a.log("Fate's Hand fizzled (needed 5-6)."); }},
+      resolve:a=>{ if(a.roll>=5){ a.hit(10); a.draw(2); } else a.log("Fate's Hand fizzled (needed 5-6)."); }},
   ]},
   { id:"tactician", name:"Tactician", hp:20, img:"Tactician.png", attacks:[
     {name:"Reinforcement Order", cost:0, note:"Draw 1 card", target:"none", resolve:a=>a.draw(1)},
     {name:"Chaos Swap", cost:2, note:"Swap board positions with an opponent", target:"enemy", resolve:a=>a.swap()},
-    {name:"Landmine", cost:3, note:"5 dmg to all enemies", target:"none", resolve:a=>a.aoeAll(5)},
+    {name:"Landmine", cost:3, note:"5 dmg to all opponents", target:"none", area:true, resolve:a=>a.hitAll(5)},
   ]},
 ];
 
@@ -398,7 +398,87 @@ function endTurn(S, ui){
   startTurn(S, ui);
 }
 
-const Rules = { allowed, startTurn, roll, skipMove, switchActive, endTurn, opponents, isOut, ROSTER, TERRAINS, CARDS, CARD_POOL, cardByName, buildDeck, shuffle, drawCards, say,
+/* ---- Attacks ---- */
+function attackCost(p, atkIndex, roll, free){
+  if(free) return 0;
+  const atk = activeChar(p).attacks[atkIndex];
+  let c = atk.costOf ? atk.costOf(p, roll) : atk.cost;
+  if(atkIndex===1 && p.supports.includes("Arcane Efficiency")) c -= 1;
+  return Math.max(0, c - p.attackDiscount - spaceCostCut(p.pos));
+}
+function moltenDamage(healing){ return Math.floor(healing*3/2); }
+function pickOpponent(S, ui, title){
+  const opts = opponents(S, S.current);
+  if(opts.length<=1) return opts.length ? opts[0] : null;
+  return ui.choosePlayer(opts, title);
+}
+function dealDamage(S, d, n){ loseHp(d, n); say(S, `  → ${d.name} takes ${n}.`); }
+// Resolve one attack that has already been paid for.
+function resolveAttack(S, atkIndex, target, roll, energyUsed, ui){
+  const p = S.players[S.current], atk = activeChar(p).attacks[atkIndex];
+  const kind = ["basic","skill","ultimate"][atkIndex], isArea = !!atk.area;
+  const molten = activeType(p)==="Mage" && realmOf(p.pos)==="Volcano";
+  const others = (keep)=> opponents(S, S.current).map(i=>S.players[i]).filter(keep);
+  const strike = (d, n)=>{ const dmg = combatDamage({ base:n, attacker:p, defender:d, kind, isArea }); dealDamage(S, d, dmg); return dmg; };
+  let moltenPool = 0;
+  const healSelf = (n)=>{
+    if(molten){ moltenPool += n; return; }
+    const h = heal(p, n); say(S, `  → ${p.name} heals ${h} (now ${p.hp}/${p.maxHp}).`);
+  };
+  say(S, `${p.name}'s ${activeChar(p).name} uses ${atk.name} (-${energyUsed}⚡).`);
+  atk.resolve({
+    player:p, target, roll, energyUsed, targetMoved: !!(target && target.movedThisTurn),
+    hit(n){ if(target) strike(target, n); },
+    splash(n){ const realm = target && realmOf(target.pos); if(realm) others(o=>o!==target && realmOf(o.pos)===realm).forEach(o=>strike(o, n)); },
+    drain(n, healEach){ const realm = realmOf(p.pos); if(realm) others(o=>realmOf(o.pos)===realm).forEach(o=>{ strike(o, n); healSelf(healEach); }); },
+    hitAll(n){ others(()=>true).forEach(o=>strike(o, n)); },
+    steal(n){ if(!target) return; const dealt = Math.min(combatDamage({ base:n, attacker:p, defender:target, kind, isArea }), target.hp);
+      dealDamage(S, target, dealt); healSelf(dealt); },
+    heal: healSelf,
+    selfDmg(n){ say(S, selfDamage(p, n) ? `  → ${p.name} takes ${n} self-damage.` : `  → ${p.name} ignores ${n} self-damage (Unyielding Fury).`); },
+    draw(n){ drawCards(S, p, n); },
+    noMove(o){ o.noMoveNext = true; say(S, `  → ${o.name} cannot move next turn.`); },
+    swap(){ [p.pos,p.trail,target.pos,target.trail] = [target.pos,target.trail,p.pos,p.trail]; p.doubleUsedAt = target.doubleUsedAt = null; say(S, `  → swapped pieces with ${target.name}.`); },
+    log(m){ say(S, m); },
+  });
+  if(moltenPool>0){   // Molten Power: the attack's healing becomes one hit, with no modifiers
+    let to = target;
+    if(!to || isOut(to)){ const pi = pickOpponent(S, ui, "Molten Power: which opponent?"); to = pi==null ? null : S.players[pi]; }
+    if(to) dealDamage(S, to, moltenDamage(moltenPool));
+  }
+}
+function relentlessApplies(S, p){
+  return !isOut(p) && activeType(p)==="Brute" && realmOf(p.pos)==="Mountain" && opponents(S, S.current).length>0;
+}
+// Target first, then roll, then pay: cancelling can never give a free reroll.
+function attackFlow(S, atkIndex, ui){
+  const p = S.players[S.current], atk = activeChar(p).attacks[atkIndex];
+  const rollSetsCost = atk.needsRoll && atk.costOf;
+  if(!rollSetsCost && p.energy<attackCost(p, atkIndex, null, false)) return "cancelled";
+  let target = null;
+  if(atk.target==="enemy"){
+    const pi = pickOpponent(S, ui, `${atk.name}: attack which player?`);
+    if(pi==null) return "cancelled";
+    target = S.players[pi];
+  }
+  const roll = atk.needsRoll ? ui.roll() : null;
+  if(roll!=null) say(S, `🎲 ${p.name} rolled ${roll}.`);
+  const cost = attackCost(p, atkIndex, roll, false);
+  p.actionUsed = true; S.phase = "After";
+  if(p.energy<cost){ say(S, `${p.name} can't afford ${atk.name} (needs ${cost}): no attack.`); return "unaffordable"; }
+  p.energy -= cost; p.energySpentThisTurn += cost; p.attackDiscount = 0;
+  p.attackedThisTurn = true; if(atkIndex===0) p.usedBasicThisTurn = true;
+  resolveAttack(S, atkIndex, target, roll, cost, ui);
+  p.nextAttackBonus = 0;
+  if(relentlessApplies(S, p)){   // Relentless Assault: mandatory, free, may pick a new target, no retrigger
+    say(S, "Relentless Assault: a free skill attack.");
+    const pi = activeChar(p).attacks[1].target==="enemy" ? pickOpponent(S, ui, "Relentless Assault: attack which player?") : null;
+    resolveAttack(S, 1, pi==null ? null : S.players[pi], null, 0, ui);
+  }
+  return "done";
+}
+
+const Rules = { attackFlow, attackCost, moltenDamage, allowed, startTurn, roll, skipMove, switchActive, endTurn, opponents, isOut, ROSTER, TERRAINS, CARDS, CARD_POOL, cardByName, buildDeck, shuffle, drawCards, say,
   typeOf, activeChar, activeType, distinctTypes, loseHp, selfDamage, heal,
   combatDamage, startRegen,
   SAVE_VERSION, isCompatibleSave, createPlayer,
