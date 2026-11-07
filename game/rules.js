@@ -245,6 +245,29 @@ function nextOptions(id){ return SPACES[id].next; }
 function prevSpace(id){ const p=SPACES[id].prev; return p.length>1 ? p[1] : p[0]; }   // middle lane when ambiguous
 function realmOf(id){ return (SPACES[id] && SPACES[id].realm) || null; }
 
+/* ---- Range: counted over the track both ways, plus crossings between lanes through spaces that
+   share a grid edge. Crossings are for counting only: pieces never use them. ---- */
+const RANGE_EDGES = Object.fromEntries(Object.keys(SPACES).map(id=>[id, new Set()]));
+Object.values(SPACES).forEach(s=>s.next.forEach(o=>{ RANGE_EDGES[s.id].add(o.to); RANGE_EDGES[o.to].add(s.id); }));
+Object.values(SPACES).forEach(s=>{
+  if(!s.realm) return;
+  const [c,r] = s.id.split(",").map(Number);
+  [`${c+1},${r}`,`${c-1},${r}`,`${c},${r+1}`,`${c},${r-1}`].forEach(id=>{
+    const o = SPACES[id];
+    if(o && o.realm===s.realm && o.lane!==s.lane) RANGE_EDGES[s.id].add(id);
+  });
+});
+function distance(a, b){
+  const seen = new Set([a]); let frontier = [a];
+  for(let d=0; frontier.length; d++){
+    if(frontier.includes(b)) return d;
+    const next = [];
+    frontier.forEach(id=>RANGE_EDGES[id].forEach(o=>{ if(!seen.has(o)){ seen.add(o); next.push(o); } }));
+    frontier = next;
+  }
+  return Infinity;
+}
+
 /* ---- Movement ---- */
 function laneChoices(p, opts){ return opts.filter(o=> o.energy>=0 || p.energy>=-o.energy); }
 function spaceLabel(id){ const s=SPACES[id]; return `${s.realm||"Corridor"}${s.text?` — ${s.text}`:""}`; }
@@ -325,12 +348,15 @@ function createPlayer({ name, color, charIds, activeIdx=0 }){
 function opponents(state, currentIdx){
   return state.players.map((p,i)=>i).filter(i=>i!==currentIdx && !isOut(state.players[i]));
 }
+function withinRange(state, pi, n){
+  return opponents(state, pi).filter(o=>distance(state.players[pi].pos, state.players[o].pos)<=n);
+}
 
 const Rules = { opponents, isOut, ROSTER, TERRAINS, CARDS, CARD_POOL, cardByName, buildDeck, shuffle, drawCards, say,
   typeOf, activeChar, activeType, distinctTypes, loseHp, selfDamage, heal,
   combatDamage, startRegen,
   SAVE_VERSION, isCompatibleSave, createPlayer,
   spaceXY, SPACES, START_SPACE, nextOptions, prevSpace, realmOf, spaceLabel, SPACE_EFFECTS,
-  laneChoices, moveForward, moveByCard, moveBack, landOn, spaceDamageBonus, spaceCostCut, onDoubleSpace };
+  laneChoices, moveForward, moveByCard, moveBack, landOn, spaceDamageBonus, spaceCostCut, onDoubleSpace, distance, withinRange };
 if (typeof module === "object" && module.exports) module.exports = Rules; else window.Rules = Rules;
 })();

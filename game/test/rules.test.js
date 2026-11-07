@@ -189,6 +189,29 @@ test("Discard one card lets you choose, and skips an empty hand", () => {
   Rules.landOn(S, p, stubUi({ picks:[1] })); assert.deepEqual(p.hand, ["a"]); assert.deepEqual(S.discard, ["b"]);
   p.hand = []; const ui = stubUi({}); Rules.landOn(S, p, ui); assert.equal(ui.asked.length, 0);
 });
+test("distance crosses lanes through shared edges", () => {
+  assert.equal(Rules.distance("12,2", "12,4"), 2);
+  assert.equal(Rules.distance("12,2", "12,3"), 1);
+  assert.equal(Rules.distance("12,2", "12,2"), 0);
+});
+test("distance uses the shorter way around the loop", () => {
+  assert.equal(Rules.distance("6,0", "5,1"), 1);
+  assert.equal(Rules.distance("6,0", "8,0"), 2);
+});
+test("every lane space has a crossing neighbour", () => {
+  for (const s of Object.values(Rules.SPACES)) if (s.realm) {
+    const near = Object.values(Rules.SPACES).filter(o => o.realm === s.realm && o.lane !== s.lane && Rules.distance(s.id, o.id) === 1);
+    assert.ok(near.length > 0, s.id);
+  }
+});
+test("crossing edges are for counting only: movement stays in the lane", () => {
+  assert.deepEqual(Rules.nextOptions("12,2").map(o => o.to), ["13,3"]);
+});
+test("withinRange filters opponents", () => {
+  const S = mkGame([["knight","cleric","titan"],["archer","gambler","berserker"],["samurai","ballista","tactician"]]);
+  S.players[0].pos = "6,0"; S.players[1].pos = "8,0"; S.players[2].pos = "15,7";
+  assert.deepEqual(Rules.withinRange(S, 0, 2), [1]);
+});
 test("space centres sit on the 3216px board grid", () => {
   assert.deepEqual([Rules.spaceXY(0,0).x, Math.round(Rules.spaceXY(15,15).y)], [250, 2968]);
 });
