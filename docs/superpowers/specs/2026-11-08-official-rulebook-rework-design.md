@@ -36,6 +36,9 @@ Q numbers here are this project's gap questions, and they are not the rulebook's
 | Q12 | Unshakable Resolve checks HP after Forager's Resilience heals. |
 | Q13 | Echoing Strikes: for that turn both characters make their 0-energy attack, and the effects of both apply. Your active character must be one of the two sharing a type. |
 | Q15 | 2–4 players. |
+| Zero damage | An attack that deals 0 deals 0 in all cases: no bonus or modifier adds to it. The rulebook is the source of truth. |
+| Adrenaline Rush | Its energy counts in the dying-together tiebreak, even for a player who is dying. |
+| Echoing Strikes | The second strike doesn't run if the attacking player's shared HP pool reached 0 or the game was won by the first. Characters are never knocked out. |
 | Landmine | Hits all opponents, with no range. **Differs from §9 and R11: flag on the PR.** |
 
 ## Goals

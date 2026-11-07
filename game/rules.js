@@ -172,6 +172,7 @@ function distinctTypes(p){ return new Set(p.chars.map(c=>typeOf(c.id))).size; }
 /* ---- Realm modifiers: they read the active character's type and the realm of the piece ---- */
 // Damage order: base, attacker's realm, defender's realm, supports, board space, events. Floor at 0 only at the end.
 function combatDamage({ base, attacker, defender, kind, isArea }){
+  if(base===0) return 0;   // the rulebook is the source of truth: an attack that deals 0 deals 0
   let dmg = base;
   const aType = activeType(attacker), aRealm = realmOf(attacker.pos);
   if(aType==="Close Range" && aRealm==="Volcano") dmg += 2;                              // Heated Edge

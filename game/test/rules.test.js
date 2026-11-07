@@ -50,6 +50,18 @@ test("the floor applies only at the end", () => {
   assert.equal(CD(a, d, { base:2, kind:"basic" }), 1);
   assert.equal(CD(a, d, { base:0, kind:"basic" }), 0);
 });
+test("an attack that deals 0 deals 0, whatever the bonuses", () => {
+  const a = pl(["samurai","cleric","titan"],"4,12"); a.supports = ["The Titan's Gauntlet"]; a.nextAttackBonus = 2;
+  assert.equal(CD(a, pl(none,"7,0"), { base:0, kind:"basic" }), 0);
+});
+test("All or Nothing on 1-3 deals 0 even on a +1 damage space", () => {
+  const S = game(["gambler","cleric","titan"],["archer","knight","berserker"]); const [p,d] = S.players; p.pos = "1,4";
+  Rules.attackFlow(S, 0, stubUi({ rolls:[2] })); assert.equal(d.hp, d.maxHp);
+});
+test("Apocalyptic Slam with no energy deals 0 even on a +1 damage space", () => {
+  const S = game(["titan","cleric","knight"],["archer","gambler","berserker"]); const [p,d] = S.players; p.pos = "1,4"; p.energy = 0;
+  Rules.attackFlow(S, 2, stubUi({})); assert.equal(d.hp, d.maxHp);
+});
 test("bonuses stack in order", () => {
   const a = pl(["samurai","cleric","titan"],"4,12"); a.supports = ["The Titan's Gauntlet"];
   assert.equal(CD(a, pl(none,"7,0"), { kind:"basic", base:2 }), 6);
