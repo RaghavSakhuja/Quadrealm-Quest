@@ -50,17 +50,17 @@ test("the floor applies only at the end", () => {
   assert.equal(CD(a, d, { base:2, kind:"basic" }), 1);
   assert.equal(CD(a, d, { base:0, kind:"basic" }), 0);
 });
-test("an attack that deals 0 deals 0, whatever the bonuses", () => {
-  const a = pl(["samurai","cleric","titan"],"4,12"); a.supports = ["The Titan's Gauntlet"]; a.nextAttackBonus = 2;
-  assert.equal(CD(a, pl(none,"7,0"), { base:0, kind:"basic" }), 0);
+test("bonuses add to a 0-damage attack: 0 with +2 deals 2", () => {
+  const a = pl(none,"7,0"); a.nextAttackBonus = 2;
+  assert.equal(CD(a, pl(none,"7,0"), { base:0, kind:"basic" }), 2);
 });
-test("All or Nothing on 1-3 deals 0 even on a +1 damage space", () => {
+test("All or Nothing on 1-3 picks up a +1 damage space", () => {
   const S = game(["gambler","cleric","titan"],["archer","knight","berserker"]); const [p,d] = S.players; p.pos = "1,4";
-  Rules.attackFlow(S, 0, stubUi({ rolls:[2] })); assert.equal(d.hp, d.maxHp);
+  Rules.attackFlow(S, 0, stubUi({ rolls:[2] })); assert.equal(d.maxHp - d.hp, 1);
 });
-test("Apocalyptic Slam with no energy deals 0 even on a +1 damage space", () => {
+test("Apocalyptic Slam with no energy picks up a +1 damage space", () => {
   const S = game(["titan","cleric","knight"],["archer","gambler","berserker"]); const [p,d] = S.players; p.pos = "1,4"; p.energy = 0;
-  Rules.attackFlow(S, 2, stubUi({})); assert.equal(d.hp, d.maxHp);
+  Rules.attackFlow(S, 2, stubUi({})); assert.equal(d.maxHp - d.hp, 1);
 });
 test("bonuses stack in order", () => {
   const a = pl(["samurai","cleric","titan"],"4,12"); a.supports = ["The Titan's Gauntlet"];
@@ -330,14 +330,18 @@ test("Spirit Drain from a corridor hits nobody and doesn't crash", () => {
   const S = game(["necromancer","knight","titan"],["archer","gambler","berserker"]); const p = S.players[0]; p.energy = 4; p.hp = 50;
   assert.equal(Rules.attackFlow(S, 1, stubUi({})), "done"); assert.equal(p.hp, 50);
 });
-test("Landmine hits every opponent, wherever they are", () => {
+test("Landmine hits only opponents within 4 spaces", () => {
   const S = game(["tactician","knight","titan"],["archer","gambler","berserker"],{ more:[["samurai","ballista","cleric"]] });
-  const [p,a,b] = S.players; p.energy = 3; a.pos = "4,14"; const [x,y] = [a.hp,b.hp];
-  Rules.attackFlow(S, 2, stubUi({})); assert.deepEqual([x-a.hp, y-b.hp], [5,5]);
+  const [p,a,b] = S.players; p.energy = 3; a.pos = "4,14"; b.pos = "10,1"; const [x,y] = [a.hp,b.hp];
+  Rules.attackFlow(S, 2, stubUi({})); assert.deepEqual([x-a.hp, y-b.hp], [0,5]);
 });
-test("steal heals only the damage dealt", () => {
+test("Dark Resurrection heals the full 5, even if less damage was dealt", () => {
   const S = game(["necromancer","knight","titan"],["archer","gambler","berserker"]); const [p,d] = S.players;
-  p.energy = 5; p.hp = 40; d.hp = 3; Rules.attackFlow(S, 2, stubUi({})); assert.equal(p.hp, 43); assert.equal(p.noMoveNext, true);
+  p.energy = 5; p.hp = 40; d.hp = 3; Rules.attackFlow(S, 2, stubUi({})); assert.equal(p.hp, 45); assert.equal(p.noMoveNext, true);
+});
+test("Dark Resurrection's heal is capped at starting HP", () => {
+  const S = game(["necromancer","knight","titan"],["archer","gambler","berserker"]); const [p] = S.players;
+  p.energy = 5; p.hp = p.maxHp - 2; Rules.attackFlow(S, 2, stubUi({})); assert.equal(p.hp, p.maxHp);
 });
 test("Molten Power turns an attack's healing into damage", () => {
   assert.equal(Rules.moltenDamage(5), 7); assert.equal(Rules.moltenDamage(2), 3);
@@ -554,10 +558,10 @@ test("Echoing Strikes makes both 0-energy attacks, if the active character share
   Rules.attackFlow(S, 2, stubUi({ confirms:[true] })); assert.equal(h - d.hp, 4); assert.equal(p.energy, 5);
   p.activeIdx = 2; assert.equal(Rules.echoingAvailable(p), false);
 });
-test("Echoing Strikes is optional", () => {
+test("Echoing Strikes is not optional: when it applies, both characters attack with no confirm", () => {
   const S = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"]]); S.phase = "Main"; const [p,d] = S.players;
-  p.supports = ["Echoing Strikes"]; p.energy = 3; p.pos = d.pos = "7,0"; const h = d.hp;
-  Rules.attackFlow(S, 2, stubUi({ confirms:[false] })); assert.equal(h - d.hp, 7); assert.equal(p.energy, 0);
+  p.supports = ["Echoing Strikes"]; p.energy = 3; p.pos = d.pos = "7,0"; const h = d.hp; const ui = stubUi({ confirms:[false] });
+  Rules.attackFlow(S, 2, ui); assert.equal(h - d.hp, 4); assert.equal(p.energy, 3); assert.equal(ui.asked.length, 0);
 });
 test("Echoing Strikes applies the effects of both attacks", () => {
   const S = mkGame([["titan","berserker","cleric"],["archer","gambler","knight"]]); S.phase = "Main"; const [p,d] = S.players;

@@ -54,7 +54,7 @@ const ROSTER = [
   { id:"tactician", name:"Tactician", hp:20, img:"Tactician.png", attacks:[
     {name:"Reinforcement Order", cost:0, note:"Draw 1 card", target:"none", resolve:a=>a.draw(1)},
     {name:"Chaos Swap", cost:2, note:"Swap board positions with an opponent", target:"enemy", resolve:a=>a.swap()},
-    {name:"Landmine", cost:3, note:"5 dmg to all opponents", target:"none", area:true, resolve:a=>a.hitAll(5)},
+    {name:"Landmine", cost:3, note:"5 dmg to every opponent within 4 spaces", target:"none", area:true, resolve:a=>a.hitWithin(4, 5)},
   ]},
 ];
 
@@ -172,7 +172,6 @@ function distinctTypes(p){ return new Set(p.chars.map(c=>typeOf(c.id))).size; }
 /* ---- Realm modifiers: they read the active character's type and the realm of the piece ---- */
 // Damage order: base, attacker's realm, defender's realm, supports, board space, events. Floor at 0 only at the end.
 function combatDamage({ base, attacker, defender, kind, isArea }){
-  if(base===0) return 0;   // the rulebook is the source of truth: an attack that deals 0 deals 0
   let dmg = base;
   const aType = activeType(attacker), aRealm = realmOf(attacker.pos);
   if(aType==="Close Range" && aRealm==="Volcano") dmg += 2;                              // Heated Edge
@@ -474,9 +473,9 @@ function resolveAttack(S, atkIndex, target, roll, energyUsed, ui, char){
     hit(n){ if(target) strike(target, n); },
     splash(n){ const realm = target && realmOf(target.pos); if(realm) others(o=>o!==target && realmOf(o.pos)===realm).forEach(o=>strike(o, n)); },
     drain(n, healEach){ const realm = realmOf(p.pos); if(realm) others(o=>realmOf(o.pos)===realm).forEach(o=>{ strike(o, n); healSelf(healEach); }); },
-    hitAll(n){ others(()=>true).forEach(o=>strike(o, n)); },
+    hitWithin(range, n){ withinRange(S, S.current, range).forEach(i=>strike(S.players[i], n)); },
     steal(n){ if(!target) return; const dealt = Math.min(combatDamage({ base:n, attacker:p, defender:target, kind, isArea }), target.hp);
-      takeDamage(S, target, dealt); hits.push(target); healSelf(dealt); },
+      takeDamage(S, target, dealt); hits.push(target); healSelf(n); },   // heals the full amount, capped like any heal
     heal: healSelf,
     selfDmg(n){ takeSelfDamage(S, p, n); },
     draw(n){ drawCards(S, p, n); },
@@ -503,7 +502,7 @@ function echoingAvailable(p){
 function attackFlow(S, atkIndex, ui){
   const p = S.players[S.current], atk = activeChar(p).attacks[atkIndex], free = !!p.bonusAttack;
   const rollSetsCost = atk.needsRoll && atk.costOf;
-  const echo = !free && echoingAvailable(p) && ui.confirm("Use Echoing Strikes? Both characters make their 0-energy attack instead.");
+  const echo = !free && echoingAvailable(p);   // not optional: when it applies, both characters attack
   if(!echo && !rollSetsCost && p.energy<attackCost(p, atkIndex, null, free)) return "cancelled";
   const strikers = echo ? p.chars.filter((c,i)=>i===p.activeIdx || typeOf(c.id)===activeType(p)).sort((a,b)=>(b===activeChar(p))-(a===activeChar(p))).slice(0,2) : [activeChar(p)];
   const index = echo ? 0 : atkIndex;

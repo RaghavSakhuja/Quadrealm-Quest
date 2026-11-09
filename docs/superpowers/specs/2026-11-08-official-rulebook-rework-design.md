@@ -28,7 +28,7 @@ Q numbers here are this project's gap questions, and they are not the rulebook's
 | Q4 | The §7 modifier list is an order: realm effects, support cards, board-space bonuses, event cards. |
 | Q5 | Event card damage is not an attack. |
 | Q6 | Area-attack bonuses apply to every target, including the main target. |
-| Q7 | Steals heal only the damage dealt. **Provisional: flag on the PR.** |
+| Q7 | Dark Resurrection heals the full 5 HP, capped at starting HP like any heal. It is not limited to the damage dealt. (Reviewer ruling, 2026-11-09.) |
 | Q8 | Game of Dice with an unaffordable roll: no attack, no energy paid, action used. |
 | Q9 | Molten Power rounds down after the final operation: `floor(heal * 3 / 2)`. |
 | Q10 | Relentless Assault is mandatory and may pick a new target. **Provisional: flag on the PR.** |
@@ -36,14 +36,13 @@ Q numbers here are this project's gap questions, and they are not the rulebook's
 | Q12 | Unshakable Resolve checks HP after Forager's Resilience heals. |
 | Q13 | Echoing Strikes: for that turn both characters make their 0-energy attack, and the effects of both apply. Your active character must be one of the two sharing a type. |
 | Q15 | 2–4 players. |
-| Zero damage | An attack that deals 0 deals 0 in all cases: no bonus or modifier adds to it. The rulebook is the source of truth. |
 | Adrenaline Rush | Its energy counts in the dying-together tiebreak, even for a player who is dying. |
 | Echoing Strikes | The second strike doesn't run if the attacking player's shared HP pool reached 0 or the game was won by the first. Characters are never knocked out. |
-| Landmine | Hits all opponents, with no range. **Differs from §9 and R11: flag on the PR.** |
+| Landmine | 5 damage to every opponent within 4 spaces (§9). (Reviewer ruling, 2026-11-09.) |
 
 ## Goals
 
-- Every review item R1–R15 is implemented, except the Landmine range, which follows the ruling above.
+- Every review item R1–R15 is implemented.
 - A turn runs in the §5 order, and the app enforces it.
 - A full 2-, 3- and 4-player game can be played to a winner with Debug off.
 - The new rules logic can be tested in Node without a page.
@@ -119,7 +118,7 @@ Vanilla JS, no dependencies, `node game/server.js`, state in `localStorage`. Old
 |---|---|
 | Exploding Arrow, Piercing Spear | The target, plus other opponents in the target's realm. |
 | Spirit Drain | Opponents in your realm. Heal 2 for each, per §9. |
-| Landmine | All opponents. |
+| Landmine | Opponents within 4 spaces. |
 | Arrow Rain (event) | Opponents within 3 spaces. Not an attack (Q5). |
 
 A corridor is not a realm, so a target there brings no splash. Eagle's View and board bonuses apply to every target (Q6). Each player takes the damage once.
@@ -128,7 +127,7 @@ A corridor is not a realm, so a target there brings no splash. Eagle's View and 
 
 **Relentless Assault** (active Brute in Mountain, R6): after any attack, a free, mandatory skill attack by the same character, with a new target choice. It does not retrigger. It is skipped if the attacker has been eliminated or no opponents remain.
 
-**Steals:** Dark Resurrection heals only the damage dealt, capped by the target's HP.
+**Steals:** Dark Resurrection heals the full 5, capped at your starting HP like any heal.
 
 **Elimination:** takes effect as soon as an attack or effect has finished resolving. Hand and supports go to the discard pile, and the piece leaves the board. If the current player is eliminated, the turn ends. Check for a winner after every resolution, not only in `endTurn`.
 
@@ -140,7 +139,7 @@ A corridor is not a realm, so a target there brings no splash. Eagle's View and 
 
 - **Edges:** every board link, in both directions, plus crossing edges between spaces in different lanes of the same realm that share a grid edge (`|dc| + |dr| = 1`).
 - **Example:** `distance("12,2", "12,4") === 2`.
-- **Used by** Arrow Rain (≤3) and Falling Rocks (≤2).
+- **Used by** Landmine (≤4), Arrow Rain (≤3) and Falling Rocks (≤2).
 - **Pieces never use crossing edges.** Movement still uses `nextOptions`.
 
 ## Cards
@@ -174,10 +173,10 @@ The three stop-movement cards are needed so mandatory movement can't trap anyone
 
 ## Calls I made (user may overrule)
 
-1. **Echoing Strikes is optional each attack,** with a confirm. Otherwise equipping it would lock you to basic attacks. Its attacks count as normal basic attacks, so modifiers apply.
+1. **Echoing Strikes is not optional.** When it applies, both characters attack, with no confirm (reviewer ruling, 2026-11-09). Its attacks count as normal basic attacks, so modifiers apply.
 2. **Veilpiercer** can be equipped but does nothing, with a note on the card, until rulebook Q25 is decided. With team HP it could only halve your own damage.
 3. **Molten Power's converted damage** ignores modifiers.
-4. **Spirit Drain** counts as an attack, so Natural Cover applies, and it still heals 2 per opponent hit even if that opponent's damage is reduced. §9 states a flat amount, and Q7 is applied to steals of a stated target.
+4. **Spirit Drain** counts as an attack, so Natural Cover applies, and it still heals 2 per opponent hit even if that opponent's damage is reduced. §9 states a flat amount.
 5. **Type cards with no effect** can still be played, after a warning that they will do nothing.
 6. **Three players dying together with two defenders tied:** the first defender clockwise from the attacker wins.
 7. **Quick Draw** waits until end of turn, so playing it before the attack still works.
