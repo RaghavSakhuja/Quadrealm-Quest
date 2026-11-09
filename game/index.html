@@ -44,20 +44,13 @@
       <button id="zoomIn" class="ghost" title="Zoom in">+</button>
       <button id="zoomFit" class="ghost" title="Fit board to view">Fit</button>
     </span>
-    <button id="calibrateBtn" class="ghost" title="Define board spaces by clicking them">Calibrate</button>
+    <label class="debug-toggle" title="Show free energy, draw and damage controls"><input type="checkbox" id="debugToggle" /> Debug</label>
     <button id="newGameBtn" class="ghost">New Game</button>
     <button id="endTurnBtn" class="primary">End Turn ▶</button>
   </div>
 
-  <div id="calibrateBar" class="hidden">
-    Calibration: click each space to add a tile. Right-click a dot to remove. Click <b>Done</b> when finished.
-    <button id="calibrateClear" class="ghost">Clear all</button>
-    <button id="calibrateDone" class="primary">Done</button>
-    <span id="tileCount" style="color:var(--muted)"></span>
-  </div>
-
   <div id="boardWrap">
-    <div id="board"><img class="boardimg" src="/assets/QuadRealm Quest/QuadRealm Quest.png" alt="board" /></div>
+    <div id="board"><img class="boardimg" src="board.jpg" alt="board" /></div>
   </div>
 
   <div id="side">
@@ -78,6 +71,7 @@
   </div>
 </div>
 
+<script src="rules.js"></script>
 <script src="game.js"></script>
 </body>
 </html>
