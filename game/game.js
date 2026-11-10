@@ -174,7 +174,7 @@ const drawCard = (p, n)=> drawCards(S, p, n);
 // Roll and move once per turn (Debug allows more); the final space's effect applies.
 function rollDice(){
   if(!allowed(S).roll) return;
-  const r = ui.roll();
+  const r = Rules.rollDie(S, S.players[S.current], ui, "Movement");
   Rules.roll(S, r, ui);
   refresh();
   const d = $("#dice"); if(d) d.textContent = r;
@@ -190,6 +190,9 @@ const ui = {
   choosePlayer(pis, title){ const pick = promptChoice(pis.map(pi=>{ const pl=S.players[pi];
     return { pi, label:`${pl.name} — ${pl.hp} HP, active ${activeChar(pl).name}` }; }), title); return pick ? pick.pi : null; },
   roll(){ const r = 1+Math.floor(Math.random()*6); const d=$("#dice"); if(d) d.textContent=r; return r; },
+  chooseRoll(rolls, title){ const pick = promptChoice(rolls.map(r=>({ r, label:`${r}` })), title); return pick ? pick.r : null; },
+  chooseNumber(min, max, title){ const pick = promptChoice(Array.from({length:max-min+1}, (_,i)=>({ n:min+i, label:`${min+i}` })), title); return pick ? pick.n : null; },
+  chooseSpace(ids, title){ const pick = promptChoice(ids.map(id=>({ id, label:spaceLabel(id) })), title); return pick ? pick.id : null; },
   confirm(title){ return confirm(title); },
 };
 
@@ -273,6 +276,12 @@ function render(){
   const rollB = btn("Roll 🎲", rollDice);
   rollB.disabled = !can.roll;
   drow.appendChild(rollB);
+  if(Rules.supportActive(p, "Steady March")){
+    const m = btn("Move exactly 3", ()=>{ Rules.steadyMarch(S, ui); refresh(); }); m.disabled = S.phase!=="Move"; drow.appendChild(m);
+  }
+  if(Rules.supportActive(p, "Teleportation Spell")){
+    const t = btn("Teleport (up to 3)", ()=>{ Rules.teleportMove(S, ui); refresh(); }); t.disabled = S.phase!=="Move"; drow.appendChild(t);
+  }
   panel.appendChild(drow);
 
   panel.appendChild(h(`<div class="section"><b>Support Slots (${(p.supports||[]).length}/2)</b></div>`));
@@ -312,6 +321,14 @@ function render(){
     const [c] = p.hand.splice(i, 1); S.discard.push(c); p.energy++; log(`${p.name} discarded ${c} for +1 energy.`); render();
   });
   discardB.disabled = !can.cards || !p.hand.length; handCtrls.appendChild(discardB);
+  if(Rules.supportActive(p, "Enchanted Library")){
+    const lib = btn("Library: 2⚡ → draw 1", ()=>{ Rules.libraryDraw(S); render(); });
+    lib.disabled = !can.cards || p.energy<2 || p.hand.length>=6; handCtrls.appendChild(lib);
+  }
+  if(Rules.supportActive(p, "Refined Strategy")){
+    const rs = btn("Refined Strategy: swap a card", ()=>{ Rules.refinedSwap(S, ui.chooseCard(p.hand, "Discard which card to draw a new one?")); render(); });
+    rs.disabled = !can.cards || p.refinedUsed || !p.hand.length; handCtrls.appendChild(rs);
+  }
   panel.appendChild(handCtrls);
 
   if(S.debug){
@@ -360,9 +377,7 @@ $("#cardPlay").onclick = ()=>{
   if(def && def.type==="support"){
     if(!allowed(S).cards){ alert("Supports are equipped in the Main phase, before your action."); return; }
     if((p.supports||[]).length>=2){ alert("Both support slots are full — unequip one first."); return; }
-    p.hand.splice(openCardIdx, 1);
-    p.supports.push(name);
-    log(`${p.name} equipped support: ${name}.`);
+    Rules.equipSupport(S, openCardIdx);
   } else {
     Rules.playEvent(S, openCardIdx, ui);
   }
