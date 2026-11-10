@@ -585,6 +585,134 @@ test("Veilpiercer has no automatic effect yet", () => {
   assert.equal(Rules.cardByName("Veilpiercer").apply, null); assert.match(Rules.cardByName("Veilpiercer").text, /No effect yet/);
 });
 
+/* ---- Remaining card effects from the rulebook ---- */
+test("every event card has an automatic effect", () => {
+  for (const c of Rules.CARD_POOL.filter(c => c.type==="event")) assert.ok(c.apply, c.name);
+});
+test("Magic Barrier halves the next attack, then is used up", () => {
+  const S = game(["knight","samurai","cleric"],["cleric","gambler","berserker"]); const [p,d] = S.players;
+  p.energy = 2; Rules.addEffect(d, { card:"Magic Barrier", until:"nextTurn" }); const h = d.hp;
+  Rules.attackFlow(S, 1, stubUi({})); assert.equal(h - d.hp, 2); assert.equal(d.effects.some(e=>e.card==="Magic Barrier"), false);
+});
+test("Armour of Thorns hits the attacker for 1", () => {
+  const S = game(["knight","samurai","cleric"],["archer","gambler","berserker"]); const [p,d] = S.players;
+  Rules.addEffect(d, { card:"Armour of Thorns", until:"nextTurn" }); Rules.attackFlow(S, 0, stubUi({})); assert.equal(p.maxHp - p.hp, 1);
+});
+test("Counterstrike hits an attacker less than 5 spaces away for 2", () => {
+  const S = game(["knight","archer","cleric"],["samurai","gambler","berserker"]); const [p,d] = S.players;
+  Rules.addEffect(d, { card:"Counterstrike", until:"nextTurn" }); Rules.attackFlow(S, 0, stubUi({})); assert.equal(p.maxHp - p.hp, 2);
+  p.hp = p.maxHp; d.pos = "4,14"; p.bonusAttack = true; Rules.attackFlow(S, 0, stubUi({})); assert.equal(p.hp, p.maxHp);
+});
+test("Stone Fortress takes 1 off with 2 Brutes", () => {
+  const d = pl(["berserker","titan","cleric"],"7,0"); d.supports = ["Stone Fortress"];
+  assert.equal(CD(pl(none,"7,0"), d), 3);
+});
+test("Longshot Gambit adds 1 at 6 or more spaces; Explosive Arrows adds 1 to area attacks", () => {
+  const a = pl(["archer","knight","cleric"],"6,0"); Rules.addEffect(a, { card:"Longshot Gambit", until:"endOfTurn" });
+  assert.equal(CD(a, pl(none,"4,14")), 5); assert.equal(CD(a, pl(none,"7,0")), 4);
+  const b = pl(["archer","knight","cleric"],"7,0"); Rules.addEffect(b, { card:"Explosive Arrows", until:"endOfTurn" });
+  assert.equal(CD(b, pl(none,"7,0"), { isArea:true }), 5); assert.equal(CD(b, pl(none,"7,0")), 4);
+});
+test("Colossus Stance takes up to 3 off self-damage over the turn", () => {
+  const p = pl(["titan","knight","cleric"],"7,0"); Rules.addEffect(p, { card:"Colossus Stance", until:"endOfTurn", left:3 });
+  assert.equal(Rules.selfDamage(p, 5), 2); assert.equal(Rules.selfDamage(p, 2), 2); assert.equal(p.maxHp - p.hp, 4);
+});
+test("Soul Battery turns healing into energy at 2:1", () => {
+  const p = pl(none,"7,0"); p.supports = ["Soul Battery"]; p.hp = p.maxHp - 10;
+  assert.equal(Rules.heal(p, 5), 0); assert.equal(p.energy, 2); assert.equal(p.hp, p.maxHp - 10);
+});
+test("Titanic Slam: an ultimate also deals 2 to every opponent", () => {
+  const S = game(["titan","knight","cleric"],["archer","gambler","berserker"],{ more:[["samurai","ballista","tactician"]] });
+  const [p,a,b] = S.players; p.energy = 2; card(S, "Titanic Slam"); const [x,y] = [a.hp,b.hp];
+  Rules.attackFlow(S, 2, stubUi({ picks:[1] })); assert.deepEqual([x-a.hp, y-b.hp], [8,2]);
+});
+test("Lifeblood Ritual adds 1 to a healing skill", () => {
+  const S = game(["cleric","knight","titan"],["archer","gambler","berserker"]); const p = S.players[0];
+  p.hp = p.maxHp - 10; p.energy = 3; card(S, "Lifeblood Ritual"); Rules.attackFlow(S, 1, stubUi({})); assert.equal(p.hp, p.maxHp - 7);
+});
+test("Warrior's Reclamation gives 1 energy per 4 damage dealt", () => {
+  const S = game(["knight","samurai","cleric"],["archer","gambler","berserker"]); const p = S.players[0];
+  p.supports = ["Warrior's Reclamation"]; p.energy = 3; Rules.attackFlow(S, 2, stubUi({})); assert.equal(p.energy, 1); assert.equal(p.reclaimDamage, 3);
+});
+test("Alchemist's Exchange: basic attacks deal no damage and give half as energy", () => {
+  const S = game(["knight","samurai","cleric"],["archer","gambler","berserker"]); const [p,d] = S.players;
+  p.supports = ["Alchemist's Exchange"]; Rules.attackFlow(S, 0, stubUi({})); assert.equal(d.hp, d.maxHp); assert.equal(p.energy, 1);
+});
+test("Restless Charge: the next attack must target an opponent within 3 spaces", () => {
+  const S = game(["knight","samurai","cleric"],["archer","gambler","berserker"]); const [p,d] = S.players;
+  Rules.addEffect(p, { card:"Restless Charge", until:"nextTurn" }); d.pos = "4,14";
+  assert.equal(Rules.attackFlow(S, 0, stubUi({})), "cancelled"); d.pos = "7,0"; assert.equal(Rules.attackFlow(S, 0, stubUi({})), "done");
+});
+test("Hidden Shortcut doubles an even roll, not an odd one", () => {
+  const S = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"]]); S.phase = "Move"; const p = S.players[0];
+  card(S, "Hidden Shortcut"); Rules.roll(S, 2, stubUi({})); assert.equal(p.pos, "11,2");
+  const T = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"]]); T.phase = "Move";
+  card(T, "Hidden Shortcut"); Rules.roll(T, 3, stubUi({})); assert.equal(T.players[0].pos, "10,1");
+});
+test("Critical Hit, Sharpened Reflexes and Duelist's Challenge react to the movement roll", () => {
+  const S = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"]]); S.phase = "Move"; const [p,d] = S.players;
+  p.supports = ["Critical Hit","Sharpened Reflexes"]; Rules.roll(S, 1, stubUi({})); assert.equal(p.energy, 1); assert.equal(p.nextAttackBonus, 0);
+  const T = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"]]); T.phase = "Move"; const q = T.players[0];
+  q.supports = ["Critical Hit","Duelist's Challenge"]; T.players[1].pos = "12,3"; Rules.roll(T, 5, stubUi({})); assert.equal(q.nextAttackBonus, 4);
+});
+test("Gambler's Favor rolls twice and keeps one", () => {
+  const S = mkGame([["gambler","knight","cleric"],["archer","samurai","berserker"]]); const p = S.players[0];
+  assert.equal(Rules.rollDie(S, p, stubUi({ rolls:[2,5] }), "x"), 2);
+  p.supports = ["Gambler's Favor"]; assert.equal(Rules.rollDie(S, p, stubUi({ rolls:[2,5] }), "x"), 5);
+});
+test("Steady March moves exactly 3; Teleportation Spell jumps up to 3", () => {
+  const S = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"]]); S.phase = "Move"; const p = S.players[0];
+  p.supports = ["Steady March"]; assert.equal(Rules.steadyMarch(S, stubUi({})), true); assert.equal(p.pos, "10,1"); assert.equal(S.phase, "Main");
+  const T = mkGame([["cleric","knight","titan"],["archer","gambler","berserker"]]); T.phase = "Move"; const q = T.players[0];
+  q.supports = ["Teleportation Spell"]; const ui = { ...stubUi({}), chooseSpace:(ids)=>ids.includes("8,0") ? "8,0" : null };
+  assert.equal(Rules.teleportMove(T, ui), true); assert.equal(q.pos, "8,0"); assert.equal(T.phase, "Main");
+});
+test("Teleport Spell only offers unoccupied spaces within 3", () => {
+  const S = mkGame([["cleric","knight","titan"],["archer","gambler","berserker"]]); const [p,d] = S.players; d.pos = "8,0"; let seen = [];
+  card(S, "Teleport Spell", { ...stubUi({}), chooseSpace:(ids)=>{ seen = ids; return ids[0]; } });
+  assert.equal(seen.includes("8,0"), false); assert.ok(seen.every(id=>Rules.distance("6,0", id)<=3)); assert.equal(p.pos, seen[0]);
+});
+test("Swift Footing, Dash Strike and Time Warp move by card", () => {
+  const S = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"]]); const p = S.players[0];
+  card(S, "Swift Footing"); assert.equal(p.pos, "10,1");
+  const T = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"]]); const q = T.players[0];
+  card(T, "Dash Strike"); assert.equal(q.pos, "7,0"); assert.equal(q.nextAttackBonus, 1);
+  const U = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"]]); card(U, "Time Warp", stubUi({ rolls:[5] })); assert.equal(U.players[0].pos, "8,0");
+  const V = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"]]); card(V, "Time Warp", stubUi({ rolls:[3] })); assert.equal(V.players[0].pos, "7,0");
+});
+test("Teleport Rune swaps with an opponent within 3; Slowed by Fear pushes a weaker one back 2", () => {
+  const S = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"]]); const [p,d] = S.players; d.pos = "8,0";
+  card(S, "Teleport Rune"); assert.deepEqual([p.pos, d.pos], ["8,0","6,0"]);
+  const T = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"]]); const e = T.players[1]; e.pos = "8,0"; e.hp = 10;
+  card(T, "Slowed by Fear"); assert.equal(e.pos, "6,0");
+});
+test("Momentum Breaker costs 1 HP to an opponent who moves more than 3 next turn", () => {
+  const S = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"]]); const d = S.players[1];
+  card(S, "Momentum Breaker"); S.current = 1; Rules.startTurn(S, stubUi({})); const h = d.hp;
+  Rules.roll(S, 4, stubUi({})); assert.equal(h - d.hp, 1); assert.equal(d.momentumMark, null);
+});
+test("Distraction, Stolen Tactics and Ancient Knowledge", () => {
+  const S = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"]]); const [p,d] = S.players;
+  d.hand = ["Medic's Touch"]; card(S, "Distraction"); assert.deepEqual(d.hand, []); assert.ok(S.discard.includes("Medic's Touch"));
+  S.lastEvent = "Medic's Touch"; p.hp = p.maxHp - 10; card(S, "Stolen Tactics"); assert.equal(p.hp, p.maxHp - 7);
+  const n = S.deck.length; card(S, "Ancient Knowledge"); assert.equal(p.hand.length, 1); assert.equal(S.deck.length, n - 1);
+});
+test("Enchanted Library and Refined Strategy are activated in Main", () => {
+  const S = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"]]); const p = S.players[0];
+  p.supports = ["Enchanted Library","Refined Strategy"]; p.energy = 2;
+  assert.equal(Rules.libraryDraw(S), true); assert.deepEqual([p.energy, p.hand.length], [0, 1]); assert.equal(Rules.libraryDraw(S), false);
+  assert.equal(Rules.refinedSwap(S, 0), true); assert.equal(p.hand.length, 1); assert.equal(Rules.refinedSwap(S, 0), false);
+});
+test("Endurance Training and Calculated Strategy resolve at end of turn", () => {
+  const S = mkGame([["knight","samurai","cleric"],["archer","gambler","berserker"]]); const p = S.players[0];
+  p.supports = ["Endurance Training","Calculated Strategy"]; p.hp = p.maxHp - 10;
+  Rules.endTurn(S, stubUi({})); assert.equal(p.hp, p.maxHp - 7); assert.equal(p.hand.length, 1);
+});
+test("Steady Aim (Archer) makes the next attack cost 1 less if you haven't moved", () => {
+  const p = pl(["archer","knight","cleric"],"7,0"); p.supports = ["Steady Aim (Archer)"];
+  assert.equal(Rules.attackCost(p, 1, null, false), 1); p.movedThisTurn = true; assert.equal(Rules.attackCost(p, 1, null, false), 2);
+});
+
 test("space centres sit on the 3216px board grid", () => {
   assert.deepEqual([Rules.spaceXY(0,0).x, Math.round(Rules.spaceXY(15,15).y)], [250, 2968]);
 });
